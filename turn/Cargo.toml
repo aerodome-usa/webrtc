@@ -25,6 +25,7 @@ rand = "0.8.5"
 ring = "0.16.20"
 md-5 = "0.10.1"
 thiserror = "1.0"
+tokio-util = "0.7.10"
 
 [dev-dependencies]
 tokio-test = "0.4.0" # must match the min version of the `tokio` crate above
