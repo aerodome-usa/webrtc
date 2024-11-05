@@ -132,8 +132,10 @@ impl Operations {
     }
 
     pub(crate) async fn close(&self) -> Result<()> {
+        eprintln!("operations called close");
         if let Some(close_tx) = &self.close_tx {
             close_tx.send(()).await?;
+            eprintln!("close sent");
         }
         Ok(())
     }
