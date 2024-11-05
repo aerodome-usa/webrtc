@@ -55,6 +55,7 @@ impl Operations {
         let ops_tx2 = Arc::clone(&ops_tx);
         tokio::spawn(async move {
             Operations::start(l, ops_tx, ops_rx, close_rx).await;
+            eprintln!("operations task done");
         });
 
         Operations {
