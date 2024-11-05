@@ -8,7 +8,7 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use portable_atomic::AtomicUsize;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot, Mutex};
 use waitgroup::WaitGroup;
 
 use crate::error::Result;
@@ -42,7 +42,7 @@ impl fmt::Debug for Operation {
 pub(crate) struct Operations {
     length: Arc<AtomicUsize>,
     ops_tx: Option<Arc<mpsc::UnboundedSender<Operation>>>,
-    close_tx: Option<mpsc::Sender<()>>,
+    close_tx: Mutex<Option<oneshot::Sender<()>>>,
 }
 
 impl Operations {
@@ -50,7 +50,7 @@ impl Operations {
         eprintln!("created operations");
         let length = Arc::new(AtomicUsize::new(0));
         let (ops_tx, ops_rx) = mpsc::unbounded_channel();
-        let (close_tx, close_rx) = mpsc::channel(1);
+        let (close_tx, close_rx) = oneshot::channel();
         let l = Arc::clone(&length);
         let ops_tx = Arc::new(ops_tx);
         let ops_tx2 = Arc::clone(&ops_tx);
@@ -62,7 +62,7 @@ impl Operations {
         Operations {
             length,
             ops_tx: Some(ops_tx2),
-            close_tx: Some(close_tx),
+            close_tx: Mutex::new(Some(close_tx)),
         }
     }
 
@@ -113,17 +113,17 @@ impl Operations {
         length: Arc<AtomicUsize>,
         ops_tx: Arc<mpsc::UnboundedSender<Operation>>,
         mut ops_rx: mpsc::UnboundedReceiver<Operation>,
-        mut close_rx: mpsc::Receiver<()>,
+        mut close_rx: oneshot::Receiver<()>,
     ) {
         loop {
             tokio::select! {
-                _ = close_rx.recv() => {
+                _ = &mut close_rx => {
                     eprintln!("received close");
-                    break;
+                    break
                 }
-                result = ops_rx.recv() => {
-                    eprintln!("received ops: {:?}", result.is_some());
-                    if let Some(mut f) = result {
+                Some(result) = ops_rx.recv() => {
+                    eprintln!("ops received");
+                    let mut f = result; {
                         length.fetch_sub(1, Ordering::SeqCst);
                         if f.0().await {
                             // Requeue this operation
@@ -132,16 +132,14 @@ impl Operations {
                     }
                 }
             }
-        };
-
-        eprintln!("start future done");
+        }
     }
 
     pub(crate) async fn close(&self) -> Result<()> {
         eprintln!("operations called close");
-        if let Some(close_tx) = &self.close_tx {
-            close_tx.send(()).await?;
-            eprintln!("close sent");
+        if let Some(close_tx) = self.close_tx.lock().await.take() {
+            let res = close_tx.send(());
+            eprintln!("close sent: {res:?}");
         }
         Ok(())
     }
