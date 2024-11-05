@@ -1915,9 +1915,9 @@ impl RTCPeerConnection {
     /// close ends the PeerConnection
     pub async fn close(&self) -> Result<()> {
         // https://www.w3.org/TR/webrtc/#dom-rtcpeerconnection-close (step #1)
-        if self.internal.is_closed.load(Ordering::SeqCst) {
-            return Ok(());
-        }
+        // if self.internal.is_closed.load(Ordering::SeqCst) {
+        //     return Ok(());
+        // }
 
         // https://www.w3.org/TR/webrtc/#dom-rtcpeerconnection-close (step #2)
         self.internal.is_closed.store(true, Ordering::SeqCst);
