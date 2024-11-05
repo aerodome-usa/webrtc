@@ -47,6 +47,7 @@ pub(crate) struct Operations {
 
 impl Operations {
     pub(crate) fn new() -> Self {
+        eprintln!("created operations");
         let length = Arc::new(AtomicUsize::new(0));
         let (ops_tx, ops_rx) = mpsc::unbounded_channel();
         let (close_tx, close_rx) = mpsc::channel(1);
