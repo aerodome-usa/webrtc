@@ -132,7 +132,9 @@ impl Operations {
                     }
                 }
             }
-        }
+        };
+
+        eprintln!("start future done");
     }
 
     pub(crate) async fn close(&self) -> Result<()> {
