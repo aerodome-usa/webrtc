@@ -1515,7 +1515,7 @@ async fn test_init_ext_ip_mapping() -> Result<()> {
     if let Err(err) = Agent::new(AgentConfig {
         nat_1to1_ips: vec!["1.2.3.4".to_owned()],
         nat_1to1_ip_candidate_type: CandidateType::Host,
-        multicast_dns_mode: MulticastDnsMode::QueryAndGather,
+        multicast_dns_mode: MulticastDnsMode::Disabled,
         ..Default::default()
     })
     .await
