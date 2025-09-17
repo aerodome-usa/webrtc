@@ -671,7 +671,7 @@ impl AgentInternal {
         {
             let mut remote_candidates = self.remote_candidates.lock().await;
             for cs in remote_candidates.values_mut() {
-                for c in cs {
+                for c in cs.drain(..) {
                     if let Err(err) = c.close().await {
                         log::warn!(
                             "[{}]: Failed to close candidate {}: {}",
@@ -680,6 +680,7 @@ impl AgentInternal {
                             err
                         );
                     }
+                    c.get_closed_ch().cancel();
                 }
             }
             remote_candidates.clear();
