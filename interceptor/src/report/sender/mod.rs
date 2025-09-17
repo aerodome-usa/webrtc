@@ -6,11 +6,10 @@ use std::collections::HashMap;
 use std::time::{Duration, SystemTime};
 
 use sender_stream::SenderStream;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::Mutex;
 use waitgroup::WaitGroup;
 
 use super::*;
-use crate::error::Error;
 use crate::*;
 
 pub(crate) struct SenderReportInternal {

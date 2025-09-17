@@ -1413,7 +1413,7 @@ async fn create_data_channel_with_max_message_size(
     if let Some(remote_max_message_size) = remote_max_message_size {
         offer
             .sdp
-            .push_str(format!("a=max-message-size:{}\r\n", remote_max_message_size).as_str());
+            .push_str(format!("a=max-message-size:{remote_max_message_size}\r\n").as_str());
     }
 
     answer_pc.set_remote_description(offer).await?;

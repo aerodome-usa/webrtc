@@ -11,10 +11,10 @@ use generator_stream::GeneratorStream;
 use rtcp::transport_feedbacks::transport_layer_nack::{
     nack_pairs_from_sequence_numbers, TransportLayerNack,
 };
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::Mutex;
 use waitgroup::WaitGroup;
 
-use crate::error::{Error, Result};
+use crate::error::Result;
 use crate::nack::stream_support_nack;
 use crate::stream_info::StreamInfo;
 use crate::{
