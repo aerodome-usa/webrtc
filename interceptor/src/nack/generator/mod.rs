@@ -53,7 +53,7 @@ impl GeneratorBuilder {
 
 impl InterceptorBuilder for GeneratorBuilder {
     fn build(&self, _id: &str) -> Result<Arc<dyn Interceptor + Send + Sync>> {
-        let (close_tx, close_rx) = mpsc::channel(1);
+        let close_token = tokio_util::sync::CancellationToken::new();
         Ok(Arc::new(Generator {
             internal: Arc::new(GeneratorInternal {
                 log2_size_minus_6: self.log2_size_minus_6.unwrap_or(13 - 6), // 8192 = 1 << 13
@@ -65,11 +65,11 @@ impl InterceptorBuilder for GeneratorBuilder {
                 },
 
                 streams: Mutex::new(HashMap::new()),
-                close_rx: Mutex::new(Some(close_rx)),
+                close_token: close_token.clone(),
             }),
 
             wg: Mutex::new(Some(WaitGroup::new())),
-            close_tx: Mutex::new(Some(close_tx)),
+            close_token: close_token.clone(),
         }))
     }
 }
@@ -80,7 +80,7 @@ struct GeneratorInternal {
     interval: Duration,
 
     streams: Mutex<HashMap<u32, Arc<GeneratorStream>>>,
-    close_rx: Mutex<Option<mpsc::Receiver<()>>>,
+    close_token: tokio_util::sync::CancellationToken,
 }
 
 /// Generator interceptor generates nack feedback messages.
@@ -88,18 +88,16 @@ pub struct Generator {
     internal: Arc<GeneratorInternal>,
 
     pub(crate) wg: Mutex<Option<WaitGroup>>,
-    pub(crate) close_tx: Mutex<Option<mpsc::Sender<()>>>,
+    pub(crate) close_token: tokio_util::sync::CancellationToken,
 }
 
 impl Generator {
-    /// builder returns a new GeneratorBuilder.
     pub fn builder() -> GeneratorBuilder {
         GeneratorBuilder::default()
     }
 
     async fn is_closed(&self) -> bool {
-        let close_tx = self.close_tx.lock().await;
-        close_tx.is_none()
+        self.close_token.is_cancelled()
     }
 
     async fn run(
@@ -107,14 +105,8 @@ impl Generator {
         internal: Arc<GeneratorInternal>,
     ) -> Result<()> {
         let mut ticker = tokio::time::interval(internal.interval);
-        let mut close_rx = internal
-            .close_rx
-            .lock()
-            .await
-            .take()
-            .ok_or(Error::ErrInvalidCloseRx)?;
-
         let sender_ssrc = rand::random::<u32>();
+        let close_token = internal.close_token.clone();
         loop {
             tokio::select! {
                 _ = ticker.tick() =>{
@@ -143,7 +135,7 @@ impl Generator {
                         }
                     }
                 }
-                _ = close_rx.recv() =>{
+                _ = close_token.cancelled() =>{
                     return Ok(());
                 }
             }
@@ -232,11 +224,7 @@ impl Interceptor for Generator {
 
     /// close closes the Interceptor, cleaning up any data if necessary.
     async fn close(&self) -> Result<()> {
-        {
-            let mut close_tx = self.close_tx.lock().await;
-            close_tx.take();
-        }
-
+        self.close_token.cancel();
         {
             let mut wait_group = self.wg.lock().await;
             if let Some(wg) = wait_group.take() {
