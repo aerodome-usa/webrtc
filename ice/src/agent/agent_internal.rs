@@ -1028,17 +1028,13 @@ impl AgentInternal {
         candidate: &Arc<dyn Candidate + Send + Sync>,
         initialized_ch: Option<broadcast::Receiver<()>>,
     ) {
-        let done_token = self.done_token.clone();
         let cand = Arc::clone(candidate);
-
         if let Some(conn) = candidate.get_conn() {
             let conn = Arc::clone(conn);
             let addr = candidate.addr();
             let ai = Arc::clone(self);
             tokio::spawn(async move {
-                let _ = ai
-                    .recv_loop(cand, done_token, initialized_ch, conn, addr)
-                    .await;
+                let _ = ai.recv_loop(cand, initialized_ch, conn, addr).await;
             });
         } else {
             log::error!("[{}]: Can't start due to conn is_none", self.get_name(),);
@@ -1110,15 +1106,18 @@ impl AgentInternal {
     async fn recv_loop(
         self: &Arc<Self>,
         candidate: Arc<dyn Candidate + Send + Sync>,
-        cancellation_token: tokio_util::sync::CancellationToken,
         initialized_ch: Option<broadcast::Receiver<()>>,
         conn: Arc<dyn util::Conn + Send + Sync>,
         addr: SocketAddr,
     ) -> Result<()> {
+        let done_token = self.done_token.clone();
+        let candidate_cancellation_token = candidate.get_closed_ch().clone();
+
         if let Some(mut initialized_ch) = initialized_ch {
             tokio::select! {
                 _ = initialized_ch.recv() => {}
-                _ = cancellation_token.cancelled() => return Err(Error::ErrClosed),
+                _ = done_token.cancelled() => return Err(Error::ErrClosed),
+                _ = candidate_cancellation_token.cancelled() => return Err(Error::ErrClosed),
             }
         }
 
@@ -1136,7 +1135,8 @@ impl AgentInternal {
                        Err(err) => return Err(Error::Other(err.to_string())),
                    }
                },
-                _  = cancellation_token.cancelled() => return Err(Error::ErrClosed),
+                _ = done_token.cancelled() => return Err(Error::ErrClosed),
+                _ = candidate_cancellation_token.cancelled() => return Err(Error::ErrClosed),
             }
 
             self.handle_inbound_candidate_msg(&candidate, &buffer[..n], src_addr, addr)
