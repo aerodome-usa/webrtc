@@ -23,7 +23,6 @@ use async_trait::async_trait;
 use candidate_base::*;
 use portable_atomic::{AtomicBool, AtomicU16, AtomicU8};
 use serde::{Deserialize, Serialize};
-use tokio::sync::{broadcast, Mutex};
 
 use crate::error::Result;
 use crate::network_type::*;
@@ -85,7 +84,7 @@ pub trait Candidate: fmt::Display {
     fn equal(&self, other: &dyn Candidate) -> bool;
     fn set_ip(&self, ip: &IpAddr) -> Result<()>;
     fn get_conn(&self) -> Option<&Arc<dyn util::Conn + Send + Sync>>;
-    fn get_closed_ch(&self) -> Arc<Mutex<Option<broadcast::Sender<()>>>>;
+    fn get_closed_ch(&self) -> tokio_util::sync::CancellationToken;
 }
 
 /// Represents the type of candidate `CandidateType` enum.

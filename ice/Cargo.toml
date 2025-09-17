@@ -10,7 +10,11 @@ homepage = "https://webrtc.rs"
 repository = "https://github.com/webrtc-rs/webrtc/tree/master/ice"
 
 [dependencies]
-util = { version = "0.11.0", path = "../util", package = "webrtc-util", default-features = false, features = ["conn", "vnet", "sync"] }
+util = { version = "0.11.0", path = "../util", package = "webrtc-util", default-features = false, features = [
+    "conn",
+    "vnet",
+    "sync",
+] }
 turn = { version = "0.10.0", path = "../turn" }
 stun = { version = "0.8.0", path = "../stun" }
 mdns = { version = "0.9.0", path = "../mdns", package = "webrtc-mdns" }
@@ -35,6 +39,7 @@ tokio = { version = "1.32.0", features = [
     "sync",
     "time",
 ] }
+tokio-util = { workspace = true }
 url = "2"
 uuid = { version = "1", features = ["v4"] }
 waitgroup = "0.1"

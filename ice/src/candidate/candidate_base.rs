@@ -7,7 +7,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use async_trait::async_trait;
 use crc::{Crc, CRC_32_ISCSI};
 use portable_atomic::{AtomicU16, AtomicU64, AtomicU8};
-use tokio::sync::{broadcast, Mutex};
+use tokio::sync::broadcast;
 use util::sync::Mutex as SyncMutex;
 
 use super::*;
@@ -48,7 +48,7 @@ pub struct CandidateBase {
     pub(crate) last_received: AtomicU64,
 
     pub(crate) conn: Option<Arc<dyn util::Conn + Send + Sync>>,
-    pub(crate) closed_ch: Arc<Mutex<Option<broadcast::Sender<()>>>>,
+    pub(crate) cancellation_token: tokio_util::sync::CancellationToken,
 
     pub(crate) foundation_override: String,
     pub(crate) priority_override: u32,
@@ -65,21 +65,16 @@ impl Default for CandidateBase {
             id: String::new(),
             network_type: AtomicU8::new(0),
             candidate_type: CandidateType::default(),
-
             component: AtomicU16::new(0),
             address: String::new(),
             port: 0,
             related_address: None,
             tcp_type: TcpType::default(),
-
             resolved_addr: SyncMutex::new(SocketAddr::new(IpAddr::from([0, 0, 0, 0]), 0)),
-
             last_sent: AtomicU64::new(0),
             last_received: AtomicU64::new(0),
-
             conn: None,
-            closed_ch: Arc::new(Mutex::new(None)),
-
+            cancellation_token: tokio_util::sync::CancellationToken::new(),
             foundation_override: String::new(),
             priority_override: 0,
             network: String::new(),
@@ -237,22 +232,13 @@ impl Candidate for CandidateBase {
 
     /// Stops the recvLoop.
     async fn close(&self) -> Result<()> {
-        {
-            let mut closed_ch = self.closed_ch.lock().await;
-            if closed_ch.is_none() {
-                return Err(Error::ErrClosed);
-            }
-            closed_ch.take();
-        }
-
+        self.cancellation_token.cancel();
         if let Some(relay_client) = &self.relay_client {
             let _ = relay_client.close().await;
         }
-
         if let Some(conn) = &self.conn {
             let _ = conn.close().await;
         }
-
         Ok(())
     }
 
@@ -305,8 +291,8 @@ impl Candidate for CandidateBase {
         self.conn.as_ref()
     }
 
-    fn get_closed_ch(&self) -> Arc<Mutex<Option<broadcast::Sender<()>>>> {
-        self.closed_ch.clone()
+    fn get_closed_ch(&self) -> tokio_util::sync::CancellationToken {
+        self.cancellation_token.clone()
     }
 }
 

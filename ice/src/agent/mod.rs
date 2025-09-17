@@ -340,6 +340,8 @@ impl Agent {
 
     /// Cleans up the Agent.
     pub async fn close(&self) -> Result<()> {
+        //FIXME: deadlock here
+        let close_result = self.internal.close().await;
         if let Some(gather_candidate_cancel) = &self.gather_candidate_cancel {
             gather_candidate_cancel();
         }
@@ -350,9 +352,7 @@ impl Agent {
         }
 
         Self::close_multicast_conn(&self.mdns_conn).await;
-
-        //FIXME: deadlock here
-        self.internal.close().await
+        close_result
     }
 
     /// Returns the selected pair or nil if there is none
@@ -399,11 +399,8 @@ impl Agent {
         self.gathering_state
             .store(GatheringState::New as u8, Ordering::SeqCst);
 
-        {
-            let done_tx = self.internal.done_tx.lock().await;
-            if done_tx.is_none() {
-                return Err(Error::ErrClosed);
-            }
+        if self.internal.done_token.is_cancelled() {
+            return Err(Error::ErrClosed);
         }
 
         // Clear all agent needed to take back to fresh state

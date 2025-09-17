@@ -13,7 +13,7 @@ use stun::textattrs::*;
 use stun::xoraddr::*;
 use tokio::time::Duration;
 use util::vnet::net::*;
-use util::Conn;
+pub use util::Conn;
 
 use crate::agent::agent_config::{InterfaceFilterFn, IpFilterFn};
 use crate::error::*;
