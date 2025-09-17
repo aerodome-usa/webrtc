@@ -287,18 +287,18 @@ impl Agent {
                 return Err(Error::ErrAddressParseFailed);
             }
 
-            let ai = Arc::clone(&self.internal);
-            let host_candidate = Arc::clone(c);
-            let mdns_conn = self.mdns_conn.clone();
-            tokio::spawn(async move {
-                if let Some(mdns_conn) = mdns_conn {
-                    if let Ok(candidate) =
-                        Self::resolve_and_add_multicast_candidate(mdns_conn, host_candidate).await
-                    {
-                        ai.add_remote_candidate(&candidate).await;
-                    }
-                }
-            });
+            // let ai = Arc::clone(&self.internal);
+            // let host_candidate = Arc::clone(c);
+            // let mdns_conn = self.mdns_conn.clone();
+            // tokio::spawn(async move {
+            //     if let Some(mdns_conn) = mdns_conn {
+            //         if let Ok(candidate) =
+            //             Self::resolve_and_add_multicast_candidate(mdns_conn, host_candidate).await
+            //         {
+            //             ai.add_remote_candidate(&candidate).await;
+            //         }
+            //     }
+            // });
         } else {
             let ai = Arc::clone(&self.internal);
             let candidate = Arc::clone(c);
