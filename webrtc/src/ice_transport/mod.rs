@@ -57,7 +57,7 @@ struct ICETransportInternal {
     role: RTCIceRole,
     conn: Option<Arc<dyn Conn + Send + Sync>>, //AgentConn
     mux: Option<Mux>,
-    cancel_tx: Option<mpsc::Sender<()>>,
+    cancellation_token: tokio_util::sync::CancellationToken,
 }
 
 /// ICETransport allows an application access to information about the ICE
@@ -147,18 +147,18 @@ impl RTCIceTransport {
                 RTCIceRole::Controlled
             };
 
-            let (cancel_tx, cancel_rx) = mpsc::channel(1);
+            let cancellation_token = tokio_util::sync::CancellationToken::new();
             {
                 let mut internal = self.internal.lock().await;
                 internal.role = role;
-                internal.cancel_tx = Some(cancel_tx);
+                internal.cancellation_token = cancellation_token.clone();
             }
 
             let conn: Arc<dyn Conn + Send + Sync> = match role {
                 RTCIceRole::Controlling => {
                     agent
                         .dial(
-                            cancel_rx,
+                            cancellation_token.clone(),
                             params.username_fragment.clone(),
                             params.password.clone(),
                         )
@@ -168,7 +168,7 @@ impl RTCIceTransport {
                 RTCIceRole::Controlled => {
                     agent
                         .accept(
-                            cancel_rx,
+                            cancellation_token.clone(),
                             params.username_fragment.clone(),
                             params.password.clone(),
                         )
@@ -222,7 +222,7 @@ impl RTCIceTransport {
         let mut errs: Vec<Error> = vec![];
         {
             let mut internal = self.internal.lock().await;
-            internal.cancel_tx.take();
+            internal.cancellation_token.cancel();
             if let Some(mut mux) = internal.mux.take() {
                 mux.close().await;
             }
@@ -236,6 +236,9 @@ impl RTCIceTransport {
         if let Err(err) = self.gatherer.close().await {
             errs.push(err);
         }
+
+        self.on_connection_state_change_handler.store(None);
+        self.on_selected_candidate_pair_change_handler.store(None);
 
         flatten_errs(errs)
     }

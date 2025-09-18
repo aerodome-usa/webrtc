@@ -1985,6 +1985,10 @@ impl RTCPeerConnection {
             close_errs.push(Error::new(format!("ice_transport: {err}")));
         }
 
+        self.internal
+            .on_peer_connection_state_change_handler
+            .store(None);
+
         // https://www.w3.org/TR/webrtc/#dom-rtcpeerconnection-close (step #11)
         RTCPeerConnection::update_connection_state(
             &self.internal.on_peer_connection_state_change_handler,

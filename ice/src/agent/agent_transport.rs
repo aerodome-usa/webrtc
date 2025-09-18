@@ -17,7 +17,7 @@ impl Agent {
     /// closes.
     pub async fn dial(
         &self,
-        mut cancel_rx: mpsc::Receiver<()>,
+        cancellation_token: tokio_util::sync::CancellationToken,
         remote_ufrag: String,
         remote_pwd: String,
     ) -> Result<Arc<impl Conn>> {
@@ -37,7 +37,7 @@ impl Agent {
             // block until pair selected
             tokio::select! {
                 _ = on_connected_rx.recv() => {},
-                _ = cancel_rx.recv() => {
+                _ = cancellation_token.cancelled() => {
                     return Err(Error::ErrCanceledByCaller);
                 }
             }
@@ -52,7 +52,7 @@ impl Agent {
     /// closes.
     pub async fn accept(
         &self,
-        mut cancel_rx: mpsc::Receiver<()>,
+        cancellation_token: tokio_util::sync::CancellationToken,
         remote_ufrag: String,
         remote_pwd: String,
     ) -> Result<Arc<impl Conn>> {
@@ -72,7 +72,7 @@ impl Agent {
             // block until pair selected
             tokio::select! {
                 _ = on_connected_rx.recv() => {},
-                _ = cancel_rx.recv() => {
+                _ = cancellation_token.cancelled() => {
                     return Err(Error::ErrCanceledByCaller);
                 }
             }
