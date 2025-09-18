@@ -103,8 +103,7 @@ pub struct DTLSConn {
     pub(crate) packet_tx: Arc<mpsc::Sender<PacketSendRequest>>,
     pub(crate) handle_queue_tx: mpsc::Sender<mpsc::Sender<()>>,
     pub(crate) handshake_done_tx: Option<mpsc::Sender<()>>,
-
-    reader_close_tx: Mutex<Option<mpsc::Sender<()>>>,
+    reader_cancellation_token: tokio_util::sync::CancellationToken,
 }
 
 type UtilResult<T> = std::result::Result<T, util::Error>;
@@ -293,7 +292,6 @@ impl DTLSConn {
         let (handshake_done_tx, handshake_done_rx) = mpsc::channel(1);
         let (packet_tx, mut packet_rx) = mpsc::channel(1);
         let (handle_queue_tx, mut handle_queue_rx) = mpsc::channel(1);
-        let (reader_close_tx, mut reader_close_rx) = mpsc::channel(1);
 
         let packet_tx = Arc::new(packet_tx);
         let packet_tx2 = Arc::clone(&packet_tx);
@@ -304,7 +302,7 @@ impl DTLSConn {
         let cache2 = cache.clone();
         let handshake_completed_successfully = Arc::new(AtomicBool::new(false));
         let handshake_completed_successfully2 = Arc::clone(&handshake_completed_successfully);
-
+        let reader_cancellation_token = tokio_util::sync::CancellationToken::new();
         let mut c = DTLSConn {
             conn: Arc::clone(&conn),
             cache,
@@ -322,7 +320,7 @@ impl DTLSConn {
             packet_tx,
             handle_queue_tx,
             handshake_done_tx: Some(handshake_done_tx),
-            reader_close_tx: Mutex::new(Some(reader_close_tx)),
+            reader_cancellation_token: reader_cancellation_token.clone(),
         };
 
         let cipher_suite1 = Arc::clone(&c.state.cipher_suite);
@@ -379,7 +377,7 @@ impl DTLSConn {
             //trace!("before enter read_and_buffer: {}] ", srv_cli_str(is_client));
             loop {
                 tokio::select! {
-                    _ = reader_close_rx.recv() => {
+                    _ = reader_cancellation_token.cancelled() => {
                         trace!(
                                 "{}: read_and_buffer exit",
                                 srv_cli_str(ctx.is_client),
@@ -510,10 +508,7 @@ impl DTLSConn {
             self.notify(AlertLevel::Warning, AlertDescription::CloseNotify)
                 .await?;
 
-            {
-                let mut reader_close_tx = self.reader_close_tx.lock().await;
-                reader_close_tx.take();
-            }
+            self.reader_cancellation_token.cancel();
             self.conn.close().await?;
         }
 
