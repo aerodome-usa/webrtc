@@ -1948,6 +1948,18 @@ impl RTCPeerConnection {
             close_errs.push(Error::new(format!("interceptor: {err}")));
         }
 
+        if let Some(interceptor) = self.internal.interceptor.upgrade() {
+            if let Err(error) = interceptor.close().await {
+                close_errs.push(Error::new(format!("internal interceptor: {error}")));
+            }
+        }
+
+        if let Some(interceptor) = self.internal.stats_interceptor.upgrade() {
+            if let Err(error) = interceptor.close().await {
+                close_errs.push(Error::new(format!("internal stats interceptor: {error}")));
+            }
+        }
+
         // https://www.w3.org/TR/webrtc/#dom-rtcpeerconnection-close (step #4)
         {
             let mut rtp_transceivers = self.internal.rtp_transceivers.lock().await;

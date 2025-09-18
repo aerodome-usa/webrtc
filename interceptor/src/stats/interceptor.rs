@@ -90,20 +90,23 @@ pub struct StatsInterceptor {
     tx: mpsc::Sender<Message>,
 
     id: String,
+    cancellation_token: tokio_util::sync::CancellationToken,
     now_gen: Arc<dyn Fn() -> SystemTime + Send + Sync>,
 }
 
 impl StatsInterceptor {
     pub fn new(id: String) -> Self {
         let (tx, rx) = mpsc::channel(100);
+        let cancellation_token = tokio_util::sync::CancellationToken::new();
 
-        tokio::spawn(run_stats_reducer(rx));
+        tokio::spawn(run_stats_reducer(rx, cancellation_token.clone()));
 
         Self {
             id,
             recv_streams: Default::default(),
             send_streams: Default::default(),
             tx,
+            cancellation_token,
             now_gen: Arc::new(SystemTime::now),
         }
     }
@@ -113,7 +116,9 @@ impl StatsInterceptor {
         F: Fn() -> SystemTime + Send + Sync + 'static,
     {
         let (tx, rx) = mpsc::channel(100);
-        tokio::spawn(run_stats_reducer(rx));
+
+        let cancellation_token = tokio_util::sync::CancellationToken::new();
+        tokio::spawn(run_stats_reducer(rx, cancellation_token.clone()));
 
         Self {
             id,
@@ -121,6 +126,7 @@ impl StatsInterceptor {
             send_streams: Default::default(),
             tx,
             now_gen: Arc::new(now_gen),
+            cancellation_token,
         }
     }
 
@@ -165,12 +171,18 @@ impl StatsInterceptor {
     }
 }
 
-async fn run_stats_reducer(mut rx: mpsc::Receiver<Message>) {
+async fn run_stats_reducer(
+    mut rx: mpsc::Receiver<Message>,
+    cancellation_token: tokio_util::sync::CancellationToken,
+) {
     let mut ssrc_stats: StatsContainer = Default::default();
     let mut cleanup_ticker = tokio::time::interval(Duration::from_secs(10));
 
     loop {
         tokio::select! {
+            _ = cancellation_token.cancelled() => {
+                break
+            }
             maybe_msg = rx.recv() => {
                 let msg = match maybe_msg {
                     Some(m) => m,
@@ -341,6 +353,7 @@ impl Interceptor for StatsInterceptor {
     }
 
     async fn close(&self) -> Result<()> {
+        self.cancellation_token.cancel();
         Ok(())
     }
 

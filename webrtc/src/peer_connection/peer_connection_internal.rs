@@ -66,7 +66,7 @@ pub(crate) struct PeerConnectionInternal {
     pub(super) setting_engine: Arc<SettingEngine>,
     pub(crate) media_engine: Arc<MediaEngine>,
     pub(super) interceptor: Weak<dyn Interceptor + Send + Sync>,
-    stats_interceptor: Weak<stats::StatsInterceptor>,
+    pub(super) stats_interceptor: Weak<stats::StatsInterceptor>,
 }
 
 impl PeerConnectionInternal {
