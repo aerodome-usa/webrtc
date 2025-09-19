@@ -326,29 +326,35 @@ impl DTLSConn {
         let cipher_suite1 = Arc::clone(&c.state.cipher_suite);
         let sequence_number = Arc::clone(&c.state.local_sequence_number);
 
-        tokio::spawn(async move {
-            loop {
-                let rx = packet_rx.recv().await;
-                if let Some(r) = rx {
-                    let (pkt, result_tx) = r;
+        tokio::spawn({
+            let reader_cancellation_token = reader_cancellation_token.clone();
+            async move {
+                loop {
+                    tokio::select! {
+                        _ = reader_cancellation_token.cancelled() => {
+                            break
+                        }
+                        Some((pkt, result_tx)) = packet_rx.recv() => {
+                            let result = DTLSConn::handle_outgoing_packets(
+                                &next_conn_tx,
+                                pkt,
+                                &mut cache1,
+                                is_client,
+                                &sequence_number,
+                                &cipher_suite1,
+                                maximum_transmission_unit,
+                            )
+                            .await;
 
-                    let result = DTLSConn::handle_outgoing_packets(
-                        &next_conn_tx,
-                        pkt,
-                        &mut cache1,
-                        is_client,
-                        &sequence_number,
-                        &cipher_suite1,
-                        maximum_transmission_unit,
-                    )
-                    .await;
-
-                    if let Some(tx) = result_tx {
-                        let _ = tx.send(result).await;
+                            if let Some(tx) = result_tx {
+                                let _ = tx.send(result).await;
+                            }
+                        }
+                        else => {
+                            trace!("{}: handle_outgoing_packets exit", srv_cli_str(is_client));
+                            break;
+                        }
                     }
-                } else {
-                    trace!("{}: handle_outgoing_packets exit", srv_cli_str(is_client));
-                    break;
                 }
             }
         });
@@ -379,9 +385,9 @@ impl DTLSConn {
                 tokio::select! {
                     _ = reader_cancellation_token.cancelled() => {
                         trace!(
-                                "{}: read_and_buffer exit",
-                                srv_cli_str(ctx.is_client),
-                            );
+                            "{client_string}: read_and_buffer exit",
+                            client_string = srv_cli_str(ctx.is_client)
+                        );
                         break;
                     }
                     result = DTLSConn::read_and_buffer(
@@ -415,7 +421,6 @@ impl DTLSConn {
 
         // Do handshake
         c.handshake(initial_fsm_state).await?;
-
         trace!("Handshake Completed");
 
         Ok(c)
