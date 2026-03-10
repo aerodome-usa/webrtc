@@ -1,12 +1,12 @@
 [package]
 name = "webrtc-util"
-version = "0.9.0"
-authors = ["Rain Liu <yliu@webrtc.rs>"]
-edition = "2021"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
 description = "Utilities for WebRTC.rs stack"
-license = "MIT OR Apache-2.0"
+license.workspace = true
 documentation = "https://docs.rs/webrtc-util"
-homepage = "https://webrtc.rs"
+homepage.workspace = true
 repository = "https://github.com/webrtc-rs/webrtc/tree/master/util"
 
 [features]
@@ -35,15 +35,14 @@ lazy_static = "1"
 async-trait = "0.1"
 ipnet = "2.6.0"
 log = "0.4"
-tracing = { workspace = true }
-rand = "0.8"
+tracing = { version = "0.1.40" }
+rand = "0.9"
 bytes = "1"
 thiserror = "1"
 portable-atomic = "1.6"
 
 [target.'cfg(not(windows))'.dependencies]
 nix = "0.26.2"
-libc = "0.2.126"
 
 [target.'cfg(windows)'.dependencies]
 bitflags = "1.3"
@@ -56,11 +55,10 @@ winapi = { version = "0.3.9", features = [
 ] }
 
 [dev-dependencies]
-tokio-test = "0.4"
+tokio-test = { version = "0.4.4" }
 env_logger = "0.11.3"
 chrono = "0.4.28"
 criterion = { version = "0.5", features = ["async_futures"] }
-async-global-executor = "2"
 
 [[bench]]
 name = "bench"

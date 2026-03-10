@@ -1,11 +1,10 @@
-use std::sync::atomic::Ordering;
-use std::sync::Arc;
-
 use async_trait::async_trait;
 use bytes::Bytes;
 use interceptor::registry::Registry;
 use interceptor::InterceptorBuilder;
 use portable_atomic::AtomicU64;
+use std::sync::atomic::Ordering;
+use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::time::Duration;
 use waitgroup::WaitGroup;
@@ -76,7 +75,7 @@ async fn test_rtp_sender_replace_track() -> Result<()> {
                 Ok((pkt, _)) => pkt,
                 Err(err) => {
                     //assert!(errors.Is(io.EOF, err))
-                    log::debug!("{}", err);
+                    log::debug!("{err}");
                     return;
                 }
             };

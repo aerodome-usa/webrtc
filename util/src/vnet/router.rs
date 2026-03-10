@@ -492,23 +492,19 @@ impl Router {
                 // check if the destination is in our subnet
                 if ipv4net.contains(&dst_ip) {
                     // search for the destination NIC
-                    if let Some(nic) = ri
-                        .nics
-                        .get(&dst_ip.to_string())
-                        .and_then(|nic| nic.upgrade())
-                    {
+                    if let Some(nic) = ri.nics.get(&dst_ip.to_string()).and_then(|p| p.upgrade()) {
                         // found the NIC, forward the chunk to the NIC.
                         // call to NIC must unlock mutex
                         let ni = nic.lock().await;
                         ni.on_inbound_chunk(c).await;
                     } else {
                         // NIC not found. drop it.
-                        log::debug!("[{}] {} unreachable", name, c);
+                        log::debug!("[{name}] {c} unreachable");
                     }
                 } else {
                     // the destination is outside of this subnet
                     // is this WAN?
-                    if let Some(parent) = &ri.parent.clone().and_then(|parent| parent.upgrade()) {
+                    if let Some(parent) = &ri.parent.clone().and_then(|p| p.upgrade()) {
                         // Pass it to the parent via NAT
                         if let Some(to_parent) = ri.nat.translate_outbound(&*c).await? {
                             // call to parent router mutex unlock mutex
@@ -517,7 +513,7 @@ impl Router {
                         }
                     } else {
                         // this WAN. No route for this chunk
-                        log::debug!("[{}] no route found for {}", name, c);
+                        log::debug!("[{name}] no route found for {c}");
                     }
                 }
             } else {
@@ -540,7 +536,7 @@ impl RouterInternal {
         if ips.is_empty() {
             // assign an IP address
             let ip = self.assign_ip_address()?;
-            log::debug!("assign_ip_address: {}", ip);
+            log::debug!("assign_ip_address: {ip}");
             ips.push(ip);
         }
 

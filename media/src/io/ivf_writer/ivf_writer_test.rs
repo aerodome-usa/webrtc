@@ -1,7 +1,6 @@
 use std::io::Cursor;
 
 use super::*;
-use crate::error::Error;
 
 #[test]
 fn test_ivf_writer_add_packet_and_close() -> Result<()> {
@@ -51,7 +50,7 @@ fn test_ivf_writer_add_packet_and_close() -> Result<()> {
             timestamp: 3653407706,
             ssrc: 476325762,
             csrc: vec![],
-            padding: raw_mid_part_pkt.len() % 4 != 0,
+            padding: !raw_mid_part_pkt.len().is_multiple_of(4),
             extensions: vec![],
             extensions_padding: 0,
         },
@@ -79,7 +78,7 @@ fn test_ivf_writer_add_packet_and_close() -> Result<()> {
             timestamp: 3653407706,
             ssrc: 476325762,
             csrc: vec![],
-            padding: raw_keyframe_pkt.len() % 4 != 0,
+            padding: !raw_keyframe_pkt.len().is_multiple_of(4),
             extensions: vec![],
             extensions_padding: 0,
         },
@@ -117,18 +116,16 @@ fn test_ivf_writer_add_packet_and_close() -> Result<()> {
 
     let add_packet_test_case = vec![
         (
-            "IVFWriter shouldn't be able to write something an empty packet",
+            "IVFWriter should be able to skip something an empty packet",
             "IVFWriter should be able to close the file",
             rtp::packet::Packet::default(),
-            Some(Error::ErrInvalidNilPacket),
             false,
-            0,
+            1,
         ),
         (
             "IVFWriter should be able to write an IVF packet",
             "IVFWriter should be able to close the file",
             valid_packet.clone(),
-            None,
             false,
             1,
         ),
@@ -136,7 +133,6 @@ fn test_ivf_writer_add_packet_and_close() -> Result<()> {
             "IVFWriter should be able to write a Keframe IVF packet",
             "IVFWriter should be able to close the file",
             keyframe_packet,
-            None,
             true,
             2,
         ),
@@ -155,7 +151,7 @@ fn test_ivf_writer_add_packet_and_close() -> Result<()> {
         unused: 0,                // Unused
     };
 
-    for (msg1, _msg2, packet, err, seen_key_frame, count) in add_packet_test_case {
+    for (msg1, _msg2, packet, seen_key_frame, count) in add_packet_test_case {
         let mut writer = IVFWriter::new(Cursor::new(Vec::<u8>::new()), &header)?;
         assert!(
             !writer.seen_key_frame,
@@ -163,12 +159,8 @@ fn test_ivf_writer_add_packet_and_close() -> Result<()> {
         );
         assert_eq!(writer.count, 0, "Writer's packet count should initialize 0");
         let result = writer.write_rtp(&packet);
-        if err.is_some() {
-            assert!(result.is_err(), "{}", msg1);
-            continue;
-        } else {
-            assert!(result.is_ok(), "{}", msg1);
-        }
+
+        assert!(result.is_ok(), "{}", msg1);
 
         assert_eq!(seen_key_frame, writer.seen_key_frame, "{msg1} failed");
         if count == 1 {

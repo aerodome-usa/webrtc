@@ -46,6 +46,7 @@ impl SenderReport {
     ) -> Result<()> {
         let mut ticker = tokio::time::interval(internal.interval);
         let close_rx = internal.close_rx.clone();
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
             tokio::select! {
                 _ = ticker.tick() =>{
@@ -64,7 +65,7 @@ impl SenderReport {
 
                         let a = Attributes::new();
                         if let Err(err) = rtcp_writer.write(&[Box::new(pkt)], &a).await{
-                            log::warn!("failed sending: {}", err);
+                            log::warn!("failed sending: {err}");
                         }
                     }
                 }
@@ -106,7 +107,7 @@ impl Interceptor for SenderReport {
         tokio::spawn(async move {
             let _d = w.take();
             if let Err(err) = SenderReport::run(writer2, internal).await {
-                log::warn!("bind_rtcp_writer Generator::run got error: {}", err);
+                log::warn!("bind_rtcp_writer Generator::run got error: {err}");
             }
         });
 

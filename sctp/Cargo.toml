@@ -1,16 +1,16 @@
 [package]
 name = "webrtc-sctp"
-version = "0.10.0"
-authors = ["Rain Liu <yliu@webrtc.rs>"]
-edition = "2021"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
 description = "A pure Rust implementation of SCTP"
-license = "MIT OR Apache-2.0"
+license.workspace = true
 documentation = "https://docs.rs/webrtc-sctp"
-homepage = "https://webrtc.rs"
+homepage.workspace = true
 repository = "https://github.com/webrtc-rs/webrtc/tree/master/sctp"
 
 [dependencies]
-util = { version = "0.9.0", path = "../util", package = "webrtc-util", default-features = false, features = ["conn"] }
+util = { workspace = true, default-features = false, features = ["conn"] }
 
 arc-swap = "1"
 tokio = { version = "1.32.0", features = [
@@ -26,16 +26,15 @@ tokio = { version = "1.32.0", features = [
     "time",
 ] }
 bytes = "1"
-rand = "0.8"
+tracing = { version = "0.1.40" }
+rand = "0.9"
 crc = "3.2.1"
-tracing = { workspace = true }
 async-trait = "0.1"
 log = "0.4"
 thiserror = "1"
 portable-atomic = "1.6"
 
 [dev-dependencies]
-tokio-test = "0.4"
 lazy_static = "1"
 env_logger = "0.11.3"
 chrono = "0.4.28"

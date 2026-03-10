@@ -34,7 +34,7 @@ use crate::proto::*;
 
 const RTP_MTU: usize = 1500;
 
-pub type AllocationMap = Arc<Mutex<HashMap<FiveTuple, Arc<Allocation>>>>;
+pub type AllocationMap = HashMap<FiveTuple, Arc<Allocation>>;
 
 /// Information about an [`Allocation`].
 #[derive(Debug, Clone)]
@@ -44,6 +44,9 @@ pub struct AllocationInfo {
 
     /// Username of this [`Allocation`].
     pub username: String,
+
+    /// Relay address of this [`Allocation`].
+    pub relay_addr: SocketAddr,
 
     /// Relayed bytes with this [`Allocation`].
     #[cfg(feature = "metrics")]
@@ -55,11 +58,13 @@ impl AllocationInfo {
     pub fn new(
         five_tuple: FiveTuple,
         username: String,
+        relay_addr: SocketAddr,
         #[cfg(feature = "metrics")] relayed_bytes: usize,
     ) -> Self {
         Self {
             five_tuple,
             username,
+            relay_addr,
             #[cfg(feature = "metrics")]
             relayed_bytes,
         }
@@ -77,7 +82,7 @@ pub struct Allocation {
     username: Username,
     permissions: Arc<Mutex<HashMap<String, Permission>>>,
     channel_bindings: Arc<Mutex<HashMap<ChannelNumber, ChannelBind>>>,
-    pub(crate) allocations: Weak<Mutex<HashMap<FiveTuple, Arc<Allocation>>>>,
+    allocations: Weak<Mutex<AllocationMap>>,
     reset_tx: SyncMutex<Option<mpsc::Sender<Duration>>>,
     timer_expired: Arc<AtomicBool>,
     closed: AtomicBool, // Option<mpsc::Receiver<()>>,
@@ -98,7 +103,7 @@ impl Allocation {
         relay_addr: SocketAddr,
         five_tuple: FiveTuple,
         username: Username,
-        allocation_map: Weak<Mutex<HashMap<FiveTuple, Arc<Allocation>>>>,
+        allocation_map: Weak<Mutex<AllocationMap>>,
         alloc_close_notify: Option<mpsc::Sender<AllocationInfo>>,
     ) -> Self {
         Allocation {
@@ -255,6 +260,7 @@ impl Allocation {
                 .send(AllocationInfo {
                     five_tuple: self.five_tuple,
                     username: self.username.text.clone(),
+                    relay_addr: self.relay_addr,
                     #[cfg(feature = "metrics")]
                     relayed_bytes: self.relayed_bytes.load(Ordering::Acquire),
                 })
@@ -365,7 +371,7 @@ impl Allocation {
                         }
                     }
                     _ = drop_rx.as_mut() => {
-                        log::trace!("allocation has stopped, stop packet_handler. five_tuple: {:?}", five_tuple);
+                        log::trace!("allocation has stopped, stop packet_handler. five_tuple: {five_tuple:?}");
                         break;
                     }
                 };
@@ -401,11 +407,7 @@ impl Allocation {
                         .send_to(&channel_data.raw, five_tuple.src_addr)
                         .await
                     {
-                        log::error!(
-                            "Failed to send ChannelData from allocation {} {}",
-                            src_addr,
-                            err
-                        );
+                        log::error!("Failed to send ChannelData from allocation {src_addr} {err}");
                     }
                 } else {
                     let exist = {
@@ -429,9 +431,7 @@ impl Allocation {
                                 Box::new(data_attr),
                             ]) {
                                 log::error!(
-                                    "Failed to send DataIndication from allocation {} {}",
-                                    src_addr,
-                                    err
+                                    "Failed to send DataIndication from allocation {src_addr} {err}"
                                 );
                                 None
                             } else {
@@ -449,17 +449,13 @@ impl Allocation {
                                 turn_socket.send_to(&msg.raw, five_tuple.src_addr).await
                             {
                                 log::error!(
-                                    "Failed to send DataIndication from allocation {} {}",
-                                    src_addr,
-                                    err
+                                    "Failed to send DataIndication from allocation {src_addr} {err}"
                                 );
                             }
                         }
                     } else {
                         log::info!(
-                            "No Permission or Channel exists for {} on allocation {}",
-                            src_addr,
-                            relay_addr
+                            "No Permission or Channel exists for {src_addr} on allocation {relay_addr}"
                         );
                     }
                 }

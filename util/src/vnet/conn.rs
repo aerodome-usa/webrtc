@@ -45,13 +45,14 @@ impl UdpConn {
     ) -> Self {
         let (read_ch_tx, read_ch_rx) = mpsc::channel(MAX_READ_QUEUE_SIZE);
 
+        let weak_obs = Arc::downgrade(&obs);
         UdpConn {
             loc_addr,
             rem_addr: RwLock::new(rem_addr),
             read_ch_tx: Arc::new(Mutex::new(Some(read_ch_tx))),
             read_ch_rx: Mutex::new(read_ch_rx),
             closed: AtomicBool::new(false),
-            obs: Arc::downgrade(&obs),
+            obs: weak_obs,
         }
     }
 

@@ -47,7 +47,7 @@ impl Permission {
             while !done {
                 tokio::select! {
                     _ = &mut timer => {
-                        if let Some(perms) = &permissions.clone().and_then(|permission| permission.upgrade()){
+                        if let Some(perms) = &permissions.clone().and_then(|x| x.upgrade()) {
                             let mut p = perms.lock().await;
                             p.remove(&addr2ipfingerprint(&addr));
                         }

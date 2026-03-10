@@ -4,7 +4,7 @@
 </h1>
 <p align="center">
  <a href="https://github.com/webrtc-rs/webrtc/actions">
-  <img src="https://github.com/webrtc-rs/webrtc/workflows/cargo/badge.svg?branch=master">
+  <img src="https://github.com/webrtc-rs/webrtc/workflows/cargo/badge.svg">
  </a>
  <a href="https://codecov.io/gh/webrtc-rs/webrtc">
   <img src="https://codecov.io/gh/webrtc-rs/webrtc/branch/master/graph/badge.svg">
@@ -29,7 +29,7 @@
  </a>
 </p>
 <p align="center">
- A pure Rust implementation of WebRTC stack. Rewrite <a href="http://Pion.ly">Pion</a> WebRTC stack in Rust
+ Async-friendly WebRTC implementation in Rust
 </p>
 
 <p align="center">
@@ -37,21 +37,19 @@
 </p>
 <!--p align="center">
 <strong>Gold Sponsors:</strong><br>
-<a href="https://www.parity.io/" target="_blank">
-<img src="https://raw.githubusercontent.com/webrtc-rs/webrtc/master/doc/parity.png" style="height:75px;" alt="Parity Technologies">
-</a><br-->
+<a href="https://www.recall.ai" target="_blank">
+<img src="https://raw.githubusercontent.com/webrtc-rs/webrtc/master/doc/recall.svg"
+alt="Recall.ai">
+</a><br>
 <p align="center">
 <strong>Silver Sponsors:</strong><br>
 <a href="https://getstream.io/video/voice-calling/?utm_source=https://github.com/webrtc-rs/webrtc&utm_medium=sponsorship&utm_content=&utm_campaign=webrtcRepo_July2023_video_klmh22" target="_blank">
-<img src="https://stream-blog-v2.imgix.net/blog/wp-content/uploads/f7401112f41742c4e173c30d4f318cb8/stream_logo_white.png?h=50" alt="Stream Chat">
+<img src="https://raw.githubusercontent.com/webrtc-rs/webrtc/master/doc/stream-logo.png" height="50" alt="Stream Chat">
 </a><br>
 <a href="https://channel.io/" target="_blank">
 <img src="https://raw.githubusercontent.com/webrtc-rs/webrtc/master/doc/ChannelTalk_logo.png" alt="ChannelTalk">
 </a><br>
 <strong>Bronze Sponsors:</strong><br>
-<a href="https://kittycad.io/" target="_blank">
-<img src="https://raw.githubusercontent.com/webrtc-rs/webrtc/master/doc/KittyCAD.png" alt="KittyCAD">
-</a><br>
 <a href="https://github.com/AdrianEddy" target="_blank">AdrianEddy</a><br>
 </p>
 
@@ -61,8 +59,6 @@
 - [Overview](#overview)
 - [Features](#features)
 - [Building](#building)
-  - [Toolchain](#toolchain)
-  - [Monorepo Setup](#monorepo-setup)
 - [Open Source License](#open-source-license)
 - [Contributing](#contributing)
 
@@ -70,9 +66,28 @@
 
 ## Overview
 
-WebRTC.rs is a pure Rust implementation of WebRTC stack, which rewrites <a href="https://github.com/pion/webrtc/releases/tag/v3.1.5">Pion</a> stack in Rust.
-This project is still in active and early development stage, please refer to the [Roadmap](https://github.com/webrtc-rs/webrtc/issues/1) to track the major milestones and releases.
-[Examples](https://github.com/webrtc-rs/webrtc/blob/master/examples/examples/README.md) provide code samples to show how to use webrtc-rs to build media and data channel applications.
+WebRTC.rs is an async-friendly WebRTC implementation in Rust, originally inspired by and largely rewriting the Pion
+stack. The project is under active development and should be considered early stage; please refer to the
+[Roadmap](https://github.com/webrtc-rs/webrtc/issues/1) for planned milestones and releases.
+The [Examples](https://github.com/webrtc-rs/webrtc/blob/master/examples/examples/README.md) demonstrate how to build
+media and data-channel applications using webrtc-rs.
+
+## 🚨 Important Notice: v0.17.x Release and Future Direction
+
+**v0.17.x is the final feature release of the Tokio-coupled async WebRTC implementation.**
+
+- **v0.17.x branch**: A dedicated branch will be created for v0.17.x that will receive **bug fixes only** (no new features).
+- **Master branch**: Will transition to a new Sans-IO based architecture built on top of [webrtc-rs/rtc](https://github.com/webrtc-rs/rtc).
+
+### **Why this change?**
+
+The project is shifting toward a Sans-IO WebRTC implementation that decouples the protocol logic from any specific async runtime. This new architecture will:
+
+- ✅ Support multiple async runtimes (Tokio, smol, async-std, etc.)
+- ✅ Provide a clean, protocol-centric Sans-IO core via [webrtc-rs/rtc](https://github.com/webrtc-rs/rtc)
+- ✅ Enable a truly runtime-agnostic, async-friendly WebRTC implementation in Rust
+
+If you need Tokio-specific stability, please use the v0.17.x branch. If you want to adopt the new runtime-agnostic approach, follow development on the master branch.
 
 ## Features
 
@@ -88,7 +103,7 @@ This project is still in active and early development stage, please refer to the
     <img src="https://raw.githubusercontent.com/webrtc-rs/webrtc/master/doc/check.png">SRTP<a href="https://crates.io/crates/webrtc-srtp"><img src="https://img.shields.io/crates/v/webrtc-srtp.svg"></a>
     <img src="https://raw.githubusercontent.com/webrtc-rs/webrtc/master/doc/check.png">SCTP<a href="https://crates.io/crates/webrtc-sctp"><img src="https://img.shields.io/crates/v/webrtc-sctp.svg"></a>
     <br>
-    <img src="https://raw.githubusercontent.com/webrtc-rs/webrtc/master/doc/check.png">DTLS<a href="https://crates.io/crates/webrtc-dtls"><img src="https://img.shields.io/crates/v/webrtc-dtls.svg"></a>
+    <img src="https://raw.githubusercontent.com/webrtc-rs/webrtc/master/doc/check.png">DTLS<a href="https://crates.io/crates/dtls"><img src="https://img.shields.io/crates/v/dtls.svg"></a>
     <br>
     <img src="https://raw.githubusercontent.com/webrtc-rs/webrtc/master/doc/check.png">mDNS<a href="https://crates.io/crates/webrtc-mdns"><img src="https://img.shields.io/crates/v/webrtc-mdns.svg"></a>
     <img src="https://raw.githubusercontent.com/webrtc-rs/webrtc/master/doc/check.png">STUN<a href="https://crates.io/crates/stun"><img src="https://img.shields.io/crates/v/stun.svg"></a>
@@ -106,16 +121,6 @@ This project is still in active and early development stage, please refer to the
 </p>
 
 ## Building
-
-### Toolchain
-
-**Minimum Supported Rust Version:** `1.65.0`
-
-Our minimum supported rust version(MSRV) policy is to support versions of the compiler released within the last six months. We don't eagerly bump the minimum version we support, instead the minimum will be bumped on a needed by needed basis, usually because downstream dependencies force us to.
-
-**Note:** Changes to the minimum supported version are not consider breaking from a [semver](https://semver.org/) perspective.
-
-### Monorepo Setup
 
 All webrtc dependent crates and examples are included in this repository at the top level in a Cargo workspace.
 
@@ -139,7 +144,10 @@ cargo build [or clippy or test or fmt]
 
 ## Open Source License
 
-Dual licensing under both MIT and Apache-2.0 is the currently accepted standard by the Rust language community and has been used for both the compiler and many public libraries since (see <https://doc.rust-lang.org/1.6.0/complement-project-faq.html#why-dual-mitasl2-license>). In order to match the community standards, webrtc-rs is using the dual MIT+Apache-2.0 license.
+Dual licensing under both MIT and Apache-2.0 is the currently accepted standard by the Rust language community and has
+been used for both the compiler and many public libraries since (
+see <https://doc.rust-lang.org/1.6.0/complement-project-faq.html#why-dual-mitasl2-license>). In order to match the
+community standards, webrtc-rs is using the dual MIT+Apache-2.0 license.
 
 ## Contributing
 

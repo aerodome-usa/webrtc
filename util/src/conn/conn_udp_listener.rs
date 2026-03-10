@@ -183,7 +183,7 @@ impl ListenConfig {
                             }
                         }
                         Err(err) => {
-                            log::warn!("ListenConfig pconn.recv_from error: {}", err);
+                            log::warn!("ListenConfig pconn.recv_from error: {err}");
                             break;
                         }
                     };

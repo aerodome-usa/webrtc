@@ -5,6 +5,8 @@ use bytes::Bytes;
 
 use crate::error::Result;
 
+type Kdf = fn(u8, &[u8], &[u8], usize, usize) -> Result<Vec<u8>>;
+
 ///NOTE: Auth tag and AEAD auth tag are placed at the different position in SRTCP
 ///
 ///In non-AEAD cipher, the authentication tag is placed *after* the ESRTCP word
@@ -27,7 +29,7 @@ use crate::error::Result;
 ///>                                    aeadAuthTagLen=16
 ///
 ///See https://tools.ietf.org/html/rfc7714 for the full specifications.
-
+///
 /// Cipher represents a implementation of one
 /// of the SRTP Specific ciphers.
 pub(crate) trait Cipher {

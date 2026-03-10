@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod ogg_writer_test;
 
-use std::io::{BufWriter, Seek, Write};
+use std::io::{BufWriter, Write};
 
 use byteorder::{LittleEndian, WriteBytesExt};
 use bytes::Bytes;
@@ -12,7 +12,7 @@ use crate::io::ogg_reader::*;
 use crate::io::Writer;
 
 /// OggWriter is used to take RTP packets and write them to an OGG on disk
-pub struct OggWriter<W: Write + Seek> {
+pub struct OggWriter<W: Write> {
     writer: W,
     sample_rate: u32,
     channel_count: u8,
@@ -25,7 +25,7 @@ pub struct OggWriter<W: Write + Seek> {
     last_payload: Bytes,
 }
 
-impl<W: Write + Seek> OggWriter<W> {
+impl<W: Write> OggWriter<W> {
     /// new initialize a new OGG Opus writer with an io.Writer output
     pub fn new(writer: W, sample_rate: u32, channel_count: u8) -> Result<Self> {
         let mut w = OggWriter {
@@ -127,7 +127,7 @@ impl<W: Write + Seek> OggWriter<W> {
     ) -> Result<()> {
         self.last_payload_size = payload.len();
         self.last_payload = payload.clone();
-        let n_segments = (self.last_payload_size + 255 - 1) / 255;
+        let n_segments = self.last_payload_size.div_ceil(255);
 
         let mut page =
             Vec::with_capacity(PAGE_HEADER_SIZE + 1 + self.last_payload_size + n_segments);
@@ -166,9 +166,13 @@ impl<W: Write + Seek> OggWriter<W> {
     }
 }
 
-impl<W: Write + Seek> Writer for OggWriter<W> {
+impl<W: Write> Writer for OggWriter<W> {
     /// write_rtp adds a new packet and writes the appropriate headers for it
     fn write_rtp(&mut self, packet: &rtp::packet::Packet) -> Result<()> {
+        if packet.payload.is_empty() {
+            return Ok(());
+        }
+
         let mut opus_packet = rtp::codecs::opus::OpusPacket;
         let payload = opus_packet.depacketize(&packet.payload)?;
 

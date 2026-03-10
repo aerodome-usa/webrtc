@@ -1,17 +1,17 @@
 [package]
 name = "sdp"
-version = "0.6.2"
-authors = ["Rain Liu <yliu@webrtc.rs>"]
-edition = "2021"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
 description = "A pure Rust implementation of SDP"
-license = "MIT OR Apache-2.0"
+license.workspace = true
 documentation = "https://docs.rs/sdp"
-homepage = "https://webrtc.rs"
+homepage.workspace = true
 repository = "https://github.com/webrtc-rs/webrtc/tree/master/sdp"
 
 [dependencies]
 url = "2"
-rand = "0.8"
+rand = "0.9"
 thiserror = "1"
 substring = "1"
 

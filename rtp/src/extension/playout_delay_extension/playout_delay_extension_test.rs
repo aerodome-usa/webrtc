@@ -1,7 +1,8 @@
 use bytes::BytesMut;
 
-use super::*;
 use crate::error::Result;
+
+use super::*;
 
 #[test]
 fn test_playout_delay_extension_roundtrip() -> Result<()> {

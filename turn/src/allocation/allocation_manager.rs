@@ -20,7 +20,7 @@ pub struct ManagerConfig {
 
 /// `Manager` is used to hold active allocations.
 pub struct Manager {
-    allocations: AllocationMap,
+    allocations: Arc<Mutex<AllocationMap>>,
     reservations: Arc<Mutex<HashMap<String, u16>>>,
     relay_addr_generator: Box<dyn RelayAddressGenerator + Send + Sync>,
     alloc_close_notify: Option<mpsc::Sender<AllocationInfo>>,
@@ -63,6 +63,7 @@ impl Manager {
                     AllocationInfo::new(
                         *five_tuple,
                         alloc.username.text.clone(),
+                        alloc.relay_addr,
                         #[cfg(feature = "metrics")]
                         alloc.relayed_bytes.load(Ordering::Acquire),
                     ),
@@ -130,7 +131,7 @@ impl Manager {
 
         if let Some(a) = allocation {
             if let Err(err) = a.close().await {
-                log::error!("Failed to close allocation: {}", err);
+                log::error!("Failed to close allocation: {err}");
             }
         }
     }
@@ -158,7 +159,7 @@ impl Manager {
 
         future::join_all(to_delete.iter().map(|a| async move {
             if let Err(err) = a.close().await {
-                log::error!("Failed to close allocation: {}", err);
+                log::error!("Failed to close allocation: {err}");
             }
         }))
         .await;

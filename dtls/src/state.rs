@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use portable_atomic::AtomicU16;
-use serde::{Deserialize, Serialize};
+use rkyv::{Archive, Deserialize, Serialize};
 use tokio::sync::Mutex;
 use util::{KeyingMaterialExporter, KeyingMaterialExporterError};
 
@@ -50,7 +50,7 @@ pub struct State {
     //pub(crate) replay_detector: Vec<Box<dyn ReplayDetector + Send + Sync>>,
 }
 
-#[derive(Serialize, Deserialize, PartialEq, Debug)]
+#[derive(Archive, Deserialize, Serialize, PartialEq, Debug)]
 struct SerializedState {
     local_epoch: u16,
     remote_epoch: u16,
@@ -63,6 +63,13 @@ struct SerializedState {
     peer_certificates: Vec<Vec<u8>>,
     identity_hint: Vec<u8>,
     is_client: bool,
+}
+
+#[derive(Archive, Deserialize, Serialize, Debug, Clone)]
+pub struct KeyLogData {
+    pub local_random: Vec<u8>,
+    pub remote_random: Vec<u8>,
+    pub master_secret: Vec<u8>,
 }
 
 impl Default for State {
@@ -232,7 +239,7 @@ impl State {
     pub async fn marshal_binary(&self) -> Result<Vec<u8>> {
         let serialized = self.serialize().await?;
 
-        match bincode::serialize(&serialized) {
+        match rkyv::to_bytes::<rkyv::rancor::Error>(&serialized).map(Vec::from) {
             Ok(enc) => Ok(enc),
             Err(err) => Err(Error::Other(err.to_string())),
         }
@@ -240,14 +247,37 @@ impl State {
 
     // unmarshal_binary is a binary.BinaryUnmarshaler.unmarshal_binary implementation
     pub async fn unmarshal_binary(&mut self, data: &[u8]) -> Result<()> {
-        let serialized: SerializedState = match bincode::deserialize(data) {
-            Ok(dec) => dec,
-            Err(err) => return Err(Error::Other(err.to_string())),
-        };
+        let serialized: SerializedState =
+            match rkyv::access::<ArchivedSerializedState, rkyv::rancor::Error>(data)
+                .and_then(rkyv::deserialize)
+            {
+                Ok(dec) => dec,
+                Err(err) => return Err(Error::Other(err.to_string())),
+            };
         self.deserialize(&serialized).await?;
         self.init_cipher_suite().await?;
 
         Ok(())
+    }
+
+    /// key_log_data returns the key log data for the current state.
+    pub fn key_log_data(&self) -> Result<KeyLogData> {
+        let mut local_random = vec![];
+        {
+            let mut writer = BufWriter::<&mut Vec<u8>>::new(local_random.as_mut());
+            self.local_random.marshal(&mut writer)?;
+        }
+        let mut remote_random = vec![];
+        {
+            let mut writer = BufWriter::<&mut Vec<u8>>::new(remote_random.as_mut());
+            self.remote_random.marshal(&mut writer)?;
+        }
+
+        Ok(KeyLogData {
+            local_random,
+            remote_random,
+            master_secret: self.master_secret.clone(),
+        })
     }
 }
 

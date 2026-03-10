@@ -1,21 +1,22 @@
 #[cfg(test)]
 mod generic_test;
 
+use unicase::UniCase;
+
 use super::*;
 
 /// fmtp_consist checks that two FMTP parameters are not inconsistent.
 fn fmtp_consist(a: &HashMap<String, String>, b: &HashMap<String, String>) -> bool {
-    //TODO: add unicode case-folding equal support
     for (k, v) in a {
         if let Some(vb) = b.get(k) {
-            if vb.to_uppercase() != v.to_uppercase() {
+            if UniCase::new(v) != UniCase::new(vb) {
                 return false;
             }
         }
     }
     for (k, v) in b {
         if let Some(va) = a.get(k) {
-            if va.to_uppercase() != v.to_uppercase() {
+            if UniCase::new(v) != UniCase::new(va) {
                 return false;
             }
         }
@@ -53,10 +54,7 @@ impl Fmtp for GenericFmtp {
     }
 
     fn equal(&self, other: &dyn Fmtp) -> bool {
-        other
-            .as_any()
-            .downcast_ref::<GenericFmtp>()
-            .map_or(false, |a| self == a)
+        other.as_any().downcast_ref::<GenericFmtp>() == Some(self)
     }
 
     fn as_any(&self) -> &dyn Any {

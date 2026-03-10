@@ -132,7 +132,7 @@ impl Agent {
                 Err(err) => {
                     // Opportunistic mDNS: If we can't open the connection, that's ok: we
                     // can continue without it.
-                    log::warn!("Failed to initialize mDNS {}: {}", mdns_name, err);
+                    log::warn!("Failed to initialize mDNS {mdns_name}: {err}");
                     None
                 }
             };
@@ -260,7 +260,7 @@ impl Agent {
         if c.tcp_type() == TcpType::Active {
             // TCP Candidates with tcptype active will probe server passive ones, so
             // no need to do anything with them.
-            log::info!("Ignoring remote candidate with tcpType active: {}", c);
+            log::info!("Ignoring remote candidate with tcpType active: {c}");
             return Ok(());
         }
 
@@ -333,16 +333,19 @@ impl Agent {
     #[tracing::instrument(skip(self))]
     pub async fn close(&self) -> Result<()> {
         tracing::info!("About to cancel candidate gathering");
-        //FIXME: deadlock here
-        let internal_close = self.internal.close().await;
         if let Some(gather_candidate_cancel) = &self.gather_candidate_cancel {
             gather_candidate_cancel();
         }
+
         if let UDPNetwork::Muxed(ref udp_mux) = self.udp_network {
             let (ufrag, _) = self.get_local_user_credentials().await;
             udp_mux.remove_conn_by_ufrag(&ufrag).await;
         }
-        internal_close
+
+        Self::close_multicast_conn(&self.mdns_conn).await;
+
+        //FIXME: deadlock here
+        self.internal.close().await
     }
 
     /// Returns the selected pair or nil if there is none
@@ -500,7 +503,7 @@ impl Agent {
     async fn close_multicast_conn(mdns_conn: &Option<Arc<DnsConn>>) {
         if let Some(conn) = mdns_conn {
             if let Err(err) = conn.close().await {
-                log::warn!("failed to close mDNS Conn: {}", err);
+                log::warn!("failed to close mDNS Conn: {err}");
             }
         }
     }

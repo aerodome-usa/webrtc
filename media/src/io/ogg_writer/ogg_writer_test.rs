@@ -1,7 +1,6 @@
 use std::io::Cursor;
 
 use super::*;
-use crate::error::Error;
 
 #[test]
 fn test_ogg_writer_add_packet_and_close() -> Result<()> {
@@ -36,28 +35,21 @@ fn test_ogg_writer_add_packet_and_close() -> Result<()> {
     // nolint:dupl
     let add_packet_test_case = vec![
         (
-            "OggWriter shouldn't be able to write an empty packet",
+            "OggWriter should be able to skip an empty packet",
             "OggWriter should be able to close the file",
             rtp::packet::Packet::default(),
-            Some(Error::ErrInvalidNilPacket),
         ),
         (
             "OggWriter should be able to write an Opus packet",
             "OggWriter should be able to close the file",
             valid_packet,
-            None,
         ),
     ];
 
-    for (msg1, _msg2, packet, err) in add_packet_test_case {
+    for (msg1, _msg2, packet) in add_packet_test_case {
         let mut writer = OggWriter::new(Cursor::new(Vec::<u8>::new()), 4800, 2)?;
         let result = writer.write_rtp(&packet);
-        if err.is_some() {
-            assert!(result.is_err(), "{}", msg1);
-            continue;
-        } else {
-            assert!(result.is_ok(), "{}", msg1);
-        }
+        assert!(result.is_ok(), "{}", msg1);
         writer.close()?;
     }
 
@@ -66,7 +58,7 @@ fn test_ogg_writer_add_packet_and_close() -> Result<()> {
 
 #[test]
 fn test_ogg_writer_add_packet() -> Result<()> {
-    let raw_pkt = Bytes::from_iter(std::iter::repeat(0x45).take(235));
+    let raw_pkt = Bytes::from_iter(std::iter::repeat_n(0x45, 235));
 
     let mut valid_packet = rtp::packet::Packet {
         header: rtp::header::Header {
@@ -107,7 +99,7 @@ fn test_ogg_writer_add_packet() -> Result<()> {
 
 #[test]
 fn test_ogg_writer_add_packet_of_255() -> Result<()> {
-    let raw_pkt = Bytes::from_iter(std::iter::repeat(0x45).take(255));
+    let raw_pkt = Bytes::from_iter(std::iter::repeat_n(0x45, 255));
 
     let mut valid_packet = rtp::packet::Packet {
         header: rtp::header::Header {
@@ -148,7 +140,7 @@ fn test_ogg_writer_add_packet_of_255() -> Result<()> {
 
 #[test]
 fn test_ogg_writer_add_large_packet() -> Result<()> {
-    let raw_pkt = Bytes::from_iter(std::iter::repeat(0x45).take(1000));
+    let raw_pkt = Bytes::from_iter(std::iter::repeat_n(0x45, 1000));
 
     let mut valid_packet = rtp::packet::Packet {
         header: rtp::header::Header {
@@ -189,7 +181,7 @@ fn test_ogg_writer_add_large_packet() -> Result<()> {
 
 #[test]
 fn test_ogg_writer_add_large_packet_with_multiple_of_255() -> Result<()> {
-    let raw_pkt = Bytes::from_iter(std::iter::repeat(0x45).take(255 * 4));
+    let raw_pkt = Bytes::from_iter(std::iter::repeat_n(0x45, 255 * 4));
 
     let mut valid_packet = rtp::packet::Packet {
         header: rtp::header::Header {

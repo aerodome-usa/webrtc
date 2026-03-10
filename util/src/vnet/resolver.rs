@@ -26,7 +26,7 @@ impl Resolver {
         };
 
         if let Err(err) = r.add_host("localhost".to_owned(), "127.0.0.1".to_owned()) {
-            log::warn!("failed to add localhost to Resolver: {}", err);
+            log::warn!("failed to add localhost to Resolver: {err}");
         }
         r
     }
@@ -55,12 +55,7 @@ impl Resolver {
         }
 
         // mutex must be unlocked before calling into parent Resolver
-        if let Some(parent) = self
-            .parent
-            .clone()
-            .and_then(|parent| parent.upgrade())
-            .clone()
-        {
+        if let Some(parent) = self.parent.clone().and_then(|p| p.upgrade()).clone() {
             Box::pin(async move {
                 let p = parent.lock().await;
                 p.lookup(host_name).await
