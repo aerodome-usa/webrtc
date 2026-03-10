@@ -21,6 +21,7 @@ impl RelayAddressGenerator for RelayAddressGeneratorNone {
         }
     }
 
+    #[tracing::instrument(skip(self))]
     async fn allocate_conn(
         &self,
         use_ipv4: bool,

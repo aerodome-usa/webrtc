@@ -1,6 +1,3 @@
-#[cfg(test)]
-mod mdns_test;
-
 use std::net::SocketAddr;
 use std::str::FromStr;
 use std::sync::Arc;

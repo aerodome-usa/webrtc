@@ -445,10 +445,7 @@ impl Net {
 
             Net::VNet(Arc::new(Mutex::new(vnet)))
         } else {
-            let interfaces = match ifaces::ifaces() {
-                Ok(ifs) => ifs,
-                Err(_) => vec![],
-            };
+            let interfaces = ifaces::ifaces().unwrap_or_default();
 
             let mut m: HashMap<String, Vec<IpNet>> = HashMap::new();
             for iface in interfaces {
@@ -524,13 +521,35 @@ impl Net {
     pub async fn bind(&self, addr: SocketAddr) -> Result<Arc<dyn Conn + Send + Sync>> {
         match self {
             Net::VNet(vnet) => {
+                tracing::info!("bind vnet {addr:?}");
                 let net = vnet.lock().await;
                 net.bind(addr).await
             }
-            Net::Ifs(_) => Ok(Arc::new(UdpSocket::bind(addr).await?)),
+            Net::Ifs(_) => {
+                tracing::info!("bind ifs {addr:?}");
+                let socket = Arc::new(UdpSocket::bind(addr).await?);
+                let socket_weak = Arc::downgrade(&socket);
+                tokio::spawn(async move {
+                    loop {
+                        if let Some(socket_strong) = socket_weak.upgrade() {
+                            tracing::debug!(
+                                "strong count for the socket is {}, address: {:?}",
+                                Arc::strong_count(&socket_strong),
+                                addr,
+                            );
+                        } else {
+                            tracing::debug!("socket is dropped {addr:?}");
+                            break;
+                        }
+                        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                    }
+                });
+                Ok(socket)
+            }
         }
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn dail(
         &self,
         use_ipv4: bool,
@@ -549,6 +568,7 @@ impl Net {
                 };
                 let local_addr = SocketAddr::new(any_ip, 0);
 
+                tracing::info!("dial bind ifs {local_addr:?} {remote_addr}");
                 let conn = UdpSocket::bind(local_addr).await?;
                 conn.connect(remote_addr).await?;
 

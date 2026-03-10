@@ -3,6 +3,9 @@ use std::fmt;
 use std::sync::Arc;
 
 use log::*;
+use rustls::client::danger::ServerCertVerifier;
+use rustls::pki_types::CertificateDer;
+use rustls::server::danger::ClientCertVerifier;
 
 use crate::cipher_suite::*;
 use crate::config::*;
@@ -12,10 +15,6 @@ use crate::crypto::*;
 use crate::error::*;
 use crate::extension::extension_use_srtp::*;
 use crate::signature_hash_algorithm::*;
-
-use rustls::client::danger::ServerCertVerifier;
-use rustls::pki_types::CertificateDer;
-use rustls::server::danger::ClientCertVerifier;
 
 //use std::io::BufWriter;
 

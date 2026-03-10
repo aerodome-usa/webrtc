@@ -1,7 +1,7 @@
-use portable_atomic::{AtomicBool, AtomicU64};
-
 use arc_swap::ArcSwapOption;
+use portable_atomic::{AtomicBool, AtomicU64};
 use util::sync::Mutex as SyncMutex;
+use util::Conn;
 
 use super::agent_transport::*;
 use super::*;
@@ -26,11 +26,11 @@ pub struct AgentInternal {
     pub(crate) on_connected_rx: Mutex<Option<mpsc::Receiver<()>>>,
 
     // State for closing
-    pub(crate) done_tx: Mutex<Option<mpsc::Sender<()>>>,
+    pub(crate) done_tx: tokio_util::sync::CancellationToken,
     // force candidate to be contacted immediately (instead of waiting for task ticker)
     pub(crate) force_candidate_contact_tx: mpsc::Sender<bool>,
     pub(crate) done_and_force_candidate_contact_rx:
-        Mutex<Option<(mpsc::Receiver<()>, mpsc::Receiver<bool>)>>,
+        Mutex<Option<(tokio_util::sync::CancellationToken, mpsc::Receiver<bool>)>>,
 
     pub(crate) chan_candidate_tx: ChanCandidateTx,
     pub(crate) chan_candidate_pair_tx: Mutex<Option<mpsc::Sender<()>>>,
@@ -89,18 +89,17 @@ impl AgentInternal {
         let (chan_candidate_tx, chan_candidate_rx) = mpsc::channel(1);
         let (chan_candidate_pair_tx, chan_candidate_pair_rx) = mpsc::channel(1);
         let (on_connected_tx, on_connected_rx) = mpsc::channel(1);
-        let (done_tx, done_rx) = mpsc::channel(1);
+        let done_notifier = tokio_util::sync::CancellationToken::new();
         let (force_candidate_contact_tx, force_candidate_contact_rx) = mpsc::channel(1);
         let (started_ch_tx, _) = broadcast::channel(1);
 
         let ai = AgentInternal {
             on_connected_tx: Mutex::new(Some(on_connected_tx)),
             on_connected_rx: Mutex::new(Some(on_connected_rx)),
-
-            done_tx: Mutex::new(Some(done_tx)),
+            done_tx: done_notifier.clone(),
             force_candidate_contact_tx,
             done_and_force_candidate_contact_rx: Mutex::new(Some((
-                done_rx,
+                done_notifier.clone(),
                 force_candidate_contact_rx,
             ))),
 
@@ -255,9 +254,8 @@ impl AgentInternal {
             done_and_force_candidate_contact_rx.take()
         };
 
-        if let Some((mut done_rx, mut force_candidate_contact_rx)) =
-            done_and_force_candidate_contact_rx
-        {
+        let cancellation_notifier = self.done_tx.clone();
+        if let Some((_, mut force_candidate_contact_rx)) = done_and_force_candidate_contact_rx {
             let ai = Arc::clone(self);
             tokio::spawn(async move {
                 loop {
@@ -293,7 +291,7 @@ impl AgentInternal {
                         _ = force_candidate_contact_rx.recv() => {
                             ai.contact(&mut last_connection_state, &mut checking_duration).await;
                         },
-                        _ = done_rx.recv() => {
+                        _ = cancellation_notifier.cancelled() => {
                             return;
                         }
                     }
@@ -541,7 +539,7 @@ impl AgentInternal {
         {
             let local_candidates = self.local_candidates.lock().await;
             if let Some(cands) = local_candidates.get(&network_type) {
-                local_cands = cands.clone();
+                local_cands.clone_from(cands);
             }
         }
 
@@ -561,7 +559,7 @@ impl AgentInternal {
             (*started_ch_tx).as_ref().map(|tx| tx.subscribe())
         };
 
-        self.start_candidate(c, initialized_ch).await;
+        self.start_candidate(c, initialized_ch);
 
         let network_type = c.network_type();
         {
@@ -593,7 +591,7 @@ impl AgentInternal {
         {
             let remote_candidates = self.remote_candidates.lock().await;
             if let Some(cands) = remote_candidates.get(&network_type) {
-                remote_cands = cands.clone();
+                remote_cands.clone_from(cands);
             }
         }
 
@@ -613,18 +611,14 @@ impl AgentInternal {
     }
 
     pub(crate) async fn close(&self) -> Result<()> {
-        {
-            let mut done_tx = self.done_tx.lock().await;
-            if done_tx.is_none() {
-                return Err(Error::ErrClosed);
-            }
-            done_tx.take();
-        };
         self.delete_all_candidates().await;
+        self.done_tx.cancel();
         {
             let mut started_ch_tx = self.started_ch_tx.lock().await;
             started_ch_tx.take();
         }
+
+        tracing::info!("Just cancelled all candidates");
 
         self.agent_conn.buffer.close().await;
 
@@ -643,6 +637,14 @@ impl AgentInternal {
             chan_state_tx.take();
         }
 
+        if let Err(error) = self.agent_conn.close().await {
+            log::warn!(
+                "[{}]: failed to close agent conn: {}",
+                self.get_name(),
+                error
+            );
+        }
+
         self.agent_conn.done.store(true, Ordering::SeqCst);
 
         Ok(())
@@ -656,7 +658,7 @@ impl AgentInternal {
         {
             let mut local_candidates = self.local_candidates.lock().await;
             for cs in local_candidates.values_mut() {
-                for c in cs {
+                for c in cs.drain(..) {
                     if let Err(err) = c.close().await {
                         log::warn!(
                             "[{}]: Failed to close candidate {}: {}",
@@ -665,15 +667,14 @@ impl AgentInternal {
                             err
                         );
                     }
+                    c.get_closed_ch().notify_waiters();
                 }
             }
-            local_candidates.clear();
         }
-
         {
             let mut remote_candidates = self.remote_candidates.lock().await;
             for cs in remote_candidates.values_mut() {
-                for c in cs {
+                for c in cs.drain(..) {
                     if let Err(err) = c.close().await {
                         log::warn!(
                             "[{}]: Failed to close candidate {}: {}",
@@ -682,9 +683,9 @@ impl AgentInternal {
                             err
                         );
                     }
+                    c.get_closed_ch().notify_waiters();
                 }
             }
-            remote_candidates.clear();
         }
     }
 
@@ -1024,18 +1025,12 @@ impl AgentInternal {
     }
 
     /// Runs the candidate using the provided connection.
-    async fn start_candidate(
+    fn start_candidate(
         self: &Arc<Self>,
         candidate: &Arc<dyn Candidate + Send + Sync>,
         initialized_ch: Option<broadcast::Receiver<()>>,
     ) {
-        let (closed_ch_tx, closed_ch_rx) = broadcast::channel(1);
-        {
-            let closed_ch = candidate.get_closed_ch();
-            let mut closed = closed_ch.lock().await;
-            *closed = Some(closed_ch_tx);
-        }
-
+        let closed_notify = candidate.get_closed_ch();
         let cand = Arc::clone(candidate);
         if let Some(conn) = candidate.get_conn() {
             let conn = Arc::clone(conn);
@@ -1043,7 +1038,7 @@ impl AgentInternal {
             let ai = Arc::clone(self);
             tokio::spawn(async move {
                 let _ = ai
-                    .recv_loop(cand, closed_ch_rx, initialized_ch, conn, addr)
+                    .recv_loop(cand, closed_notify, initialized_ch, conn, addr)
                     .await;
             });
         } else {
@@ -1073,9 +1068,11 @@ impl AgentInternal {
         });
 
         let ai = Arc::clone(self);
+        let cancellation_token = self.done_tx.clone();
         tokio::spawn(async move {
             loop {
                 tokio::select! {
+                    _ = cancellation_token.cancelled() => break,
                     opt_state = chan_state_rx.recv() => {
                         if let Some(s) = opt_state {
                             if let Some(handler) = &*ai.on_connection_state_change_hdlr.load() {
@@ -1113,18 +1110,21 @@ impl AgentInternal {
         });
     }
 
+    #[tracing::instrument(skip(self, candidate, closed_notifier, initialized_ch, conn))]
     async fn recv_loop(
         self: &Arc<Self>,
         candidate: Arc<dyn Candidate + Send + Sync>,
-        mut closed_ch_rx: broadcast::Receiver<()>,
+        closed_notifier: std::sync::Arc<tokio::sync::Notify>,
         initialized_ch: Option<broadcast::Receiver<()>>,
         conn: Arc<dyn util::Conn + Send + Sync>,
         addr: SocketAddr,
     ) -> Result<()> {
+        let cancellation_token = self.done_tx.clone();
         if let Some(mut initialized_ch) = initialized_ch {
             tokio::select! {
                 _ = initialized_ch.recv() => {}
-                _ = closed_ch_rx.recv() => return Err(Error::ErrClosed),
+                _ = closed_notifier.notified() => return Err(Error::ErrClosed),
+                _ = cancellation_token.cancelled() => return Err(Error::ErrClosed),
             }
         }
 
@@ -1133,16 +1133,23 @@ impl AgentInternal {
         let mut src_addr;
         loop {
             tokio::select! {
-               result = conn.recv_from(&mut buffer) => {
-                   match result {
-                       Ok((num, src)) => {
-                            n = num;
-                            src_addr = src;
-                       }
-                       Err(err) => return Err(Error::Other(err.to_string())),
-                   }
-               },
-                _  = closed_ch_rx.recv() => return Err(Error::ErrClosed),
+                _ = cancellation_token.cancelled() => {
+                    tracing::info!("recv loop being cancelled and closing, addr is {addr:?}");
+                    return Err(Error::ErrClosed)
+                },
+                result = conn.recv_from(&mut buffer) => {
+                        match result {
+                            Ok((num, src)) => {
+                                    n = num;
+                                    src_addr = src;
+                            }
+                            Err(err) => return Err(Error::Other(err.to_string())),
+                        }
+                },
+                _  = closed_notifier.notified() => {
+                    tracing::info!("recv loop being notified and closing, addr is {addr:?}");
+                    return Err(Error::ErrClosed)
+                },
             }
 
             self.handle_inbound_candidate_msg(&candidate, &buffer[..n], src_addr, addr)

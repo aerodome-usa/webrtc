@@ -1,3 +1,6 @@
+// This crate is vendored and planned for deprecation so just ignore any warnings for now
+#![allow(clippy::all)]
+
 #[cfg(test)]
 mod tests {
     #[test]

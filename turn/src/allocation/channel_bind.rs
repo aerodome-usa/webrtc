@@ -18,7 +18,7 @@ use crate::proto::channum::*;
 pub struct ChannelBind {
     pub(crate) peer: SocketAddr,
     pub(crate) number: ChannelNumber,
-    pub(crate) channel_bindings: Option<Arc<Mutex<HashMap<ChannelNumber, ChannelBind>>>>,
+    pub(crate) channel_bindings: Option<Weak<Mutex<HashMap<ChannelNumber, ChannelBind>>>>,
     reset_tx: Option<mpsc::Sender<Duration>>,
     timer_expired: Arc<AtomicBool>,
 }
@@ -51,7 +51,7 @@ impl ChannelBind {
             while !done {
                 tokio::select! {
                     _ = &mut timer => {
-                        if let Some(cbs) = &channel_bindings{
+                        if let Some(cbs) = &channel_bindings.clone().and_then(|binding| binding.upgrade()){
                             let mut cb = cbs.lock().await;
                             if cb.remove(&number).is_none() {
                                 log::error!("Failed to remove ChannelBind for {}", number);

@@ -1,5 +1,6 @@
-use cbc::cipher::block_padding::{PadType, RawPadding, UnpadError};
 use core::panic;
+
+use cbc::cipher::block_padding::{PadType, RawPadding, UnpadError};
 
 pub enum DtlsPadding {}
 /// Reference: RFC5246, 6.2.3.2

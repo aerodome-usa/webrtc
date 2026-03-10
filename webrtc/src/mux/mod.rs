@@ -103,7 +103,9 @@ impl Mux {
         let mut n = 0usize;
         loop {
             tokio::select! {
-                _ = closed_ch_rx.recv() => break,
+                _ = closed_ch_rx.recv() => {
+                    break
+                },
                 result = next_conn.recv(&mut buf) => {
                     if let Ok(m) = result{
                         n = m;

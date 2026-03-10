@@ -42,25 +42,28 @@ impl fmt::Debug for Operation {
 pub(crate) struct Operations {
     length: Arc<AtomicUsize>,
     ops_tx: Option<Arc<mpsc::UnboundedSender<Operation>>>,
-    close_tx: Option<mpsc::Sender<()>>,
+    cancellation_token: tokio_util::sync::CancellationToken,
 }
 
 impl Operations {
     pub(crate) fn new() -> Self {
         let length = Arc::new(AtomicUsize::new(0));
         let (ops_tx, ops_rx) = mpsc::unbounded_channel();
-        let (close_tx, close_rx) = mpsc::channel(1);
+        let cancellation_token = tokio_util::sync::CancellationToken::new();
         let l = Arc::clone(&length);
         let ops_tx = Arc::new(ops_tx);
         let ops_tx2 = Arc::clone(&ops_tx);
-        tokio::spawn(async move {
-            Operations::start(l, ops_tx, ops_rx, close_rx).await;
+        tokio::spawn({
+            let cancellation_token = cancellation_token.clone();
+            async move {
+                Operations::start(l, ops_tx, ops_rx, cancellation_token).await;
+            }
         });
 
         Operations {
             length,
             ops_tx: Some(ops_tx2),
-            close_tx: Some(close_tx),
+            cancellation_token,
         }
     }
 
@@ -111,11 +114,11 @@ impl Operations {
         length: Arc<AtomicUsize>,
         ops_tx: Arc<mpsc::UnboundedSender<Operation>>,
         mut ops_rx: mpsc::UnboundedReceiver<Operation>,
-        mut close_rx: mpsc::Receiver<()>,
+        cancellation_token: tokio_util::sync::CancellationToken,
     ) {
         loop {
             tokio::select! {
-                _ = close_rx.recv() => {
+                _ = cancellation_token.cancelled() => {
                     break;
                 }
                 result = ops_rx.recv() => {
@@ -132,9 +135,7 @@ impl Operations {
     }
 
     pub(crate) async fn close(&self) -> Result<()> {
-        if let Some(close_tx) = &self.close_tx {
-            close_tx.send(()).await?;
-        }
+        self.cancellation_token.cancel();
         Ok(())
     }
 }

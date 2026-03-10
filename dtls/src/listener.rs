@@ -17,7 +17,10 @@ use crate::record_layer::record_layer_header::RecordLayerHeader;
 use crate::record_layer::unpack_datagram;
 
 /// Listen creates a DTLS listener
-pub async fn listen<A: 'static + ToSocketAddrs>(laddr: A, config: Config) -> Result<impl Listener> {
+pub async fn listen<A: 'static + ToSocketAddrs + std::fmt::Debug>(
+    laddr: A,
+    config: Config,
+) -> Result<impl Listener> {
     validate_config(false, &config)?;
 
     let mut lc = ListenConfig {

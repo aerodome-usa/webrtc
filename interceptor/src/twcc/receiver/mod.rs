@@ -31,7 +31,7 @@ impl ReceiverBuilder {
 
 impl InterceptorBuilder for ReceiverBuilder {
     fn build(&self, _id: &str) -> Result<Arc<dyn Interceptor + Send + Sync>> {
-        let (close_tx, close_rx) = mpsc::channel(1);
+        let cancellation_token = tokio_util::sync::CancellationToken::new();
         let (packet_chan_tx, packet_chan_rx) = mpsc::channel(1);
         Ok(Arc::new(Receiver {
             internal: Arc::new(ReceiverInternal {
@@ -43,12 +43,12 @@ impl InterceptorBuilder for ReceiverBuilder {
                 recorder: Mutex::new(Recorder::default()),
                 packet_chan_rx: Mutex::new(Some(packet_chan_rx)),
                 streams: Mutex::new(HashMap::new()),
-                close_rx: Mutex::new(Some(close_rx)),
+                close_rx: cancellation_token.clone(),
             }),
             start_time: tokio::time::Instant::now(),
             packet_chan_tx,
             wg: Mutex::new(Some(WaitGroup::new())),
-            close_tx: Mutex::new(Some(close_tx)),
+            close_tx: cancellation_token.clone(),
         }))
     }
 }
@@ -65,7 +65,7 @@ struct ReceiverInternal {
     recorder: Mutex<Recorder>,
     packet_chan_rx: Mutex<Option<mpsc::Receiver<Packet>>>,
     streams: Mutex<HashMap<u32, Arc<ReceiverStream>>>,
-    close_rx: Mutex<Option<mpsc::Receiver<()>>>,
+    close_rx: tokio_util::sync::CancellationToken,
 }
 
 /// Receiver sends transport-wide congestion control reports as specified in:
@@ -78,7 +78,7 @@ pub struct Receiver {
     packet_chan_tx: mpsc::Sender<Packet>,
 
     wg: Mutex<Option<WaitGroup>>,
-    close_tx: Mutex<Option<mpsc::Sender<()>>>,
+    close_tx: tokio_util::sync::CancellationToken,
 }
 
 impl Receiver {
@@ -88,22 +88,13 @@ impl Receiver {
     }
 
     async fn is_closed(&self) -> bool {
-        let close_tx = self.close_tx.lock().await;
-        close_tx.is_none()
+        self.close_tx.is_cancelled()
     }
 
     async fn run(
         rtcp_writer: Arc<dyn RTCPWriter + Send + Sync>,
         internal: Arc<ReceiverInternal>,
     ) -> Result<()> {
-        let mut close_rx = {
-            let mut close_rx = internal.close_rx.lock().await;
-            if let Some(close_rx) = close_rx.take() {
-                close_rx
-            } else {
-                return Err(Error::ErrInvalidCloseRx);
-            }
-        };
         let mut packet_chan_rx = {
             let mut packet_chan_rx = internal.packet_chan_rx.lock().await;
             if let Some(packet_chan_rx) = packet_chan_rx.take() {
@@ -116,9 +107,10 @@ impl Receiver {
         let a = Attributes::new();
         let mut ticker = tokio::time::interval(internal.interval);
         ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
+        let close_rx = internal.close_rx.clone();
         loop {
             tokio::select! {
-                _ = close_rx.recv() =>{
+                _ = close_rx.cancelled() => {
                     return Ok(());
                 }
                 p = packet_chan_rx.recv() => {
@@ -245,11 +237,7 @@ impl Interceptor for Receiver {
 
     /// close closes the Interceptor, cleaning up any data if necessary.
     async fn close(&self) -> Result<()> {
-        {
-            let mut close_tx = self.close_tx.lock().await;
-            close_tx.take();
-        }
-
+        self.close_tx.cancel();
         {
             let mut wait_group = self.wg.lock().await;
             if let Some(wg) = wait_group.take() {

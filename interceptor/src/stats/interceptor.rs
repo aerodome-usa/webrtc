@@ -88,6 +88,7 @@ pub struct StatsInterceptor {
     send_streams: Mutex<HashMap<u32, Arc<RTPWriteRecorder>>>,
 
     tx: mpsc::Sender<Message>,
+    closed_notifier: tokio_util::sync::CancellationToken,
 
     id: String,
     now_gen: Arc<dyn Fn() -> SystemTime + Send + Sync>,
@@ -96,14 +97,15 @@ pub struct StatsInterceptor {
 impl StatsInterceptor {
     pub fn new(id: String) -> Self {
         let (tx, rx) = mpsc::channel(100);
-
-        tokio::spawn(run_stats_reducer(rx));
+        let closed_notifier = tokio_util::sync::CancellationToken::new();
+        tokio::spawn(run_stats_reducer(rx, closed_notifier.clone()));
 
         Self {
             id,
             recv_streams: Default::default(),
             send_streams: Default::default(),
             tx,
+            closed_notifier: closed_notifier.clone(),
             now_gen: Arc::new(SystemTime::now),
         }
     }
@@ -113,13 +115,15 @@ impl StatsInterceptor {
         F: Fn() -> SystemTime + Send + Sync + 'static,
     {
         let (tx, rx) = mpsc::channel(100);
-        tokio::spawn(run_stats_reducer(rx));
+        let closed_notifier = tokio_util::sync::CancellationToken::new();
+        tokio::spawn(run_stats_reducer(rx, closed_notifier.clone()));
 
         Self {
             id,
             recv_streams: Default::default(),
             send_streams: Default::default(),
             tx,
+            closed_notifier: closed_notifier.clone(),
             now_gen: Arc::new(now_gen),
         }
     }
@@ -169,7 +173,10 @@ impl StatsInterceptor {
     }
 }
 
-async fn run_stats_reducer(mut rx: mpsc::Receiver<Message>) {
+async fn run_stats_reducer(
+    mut rx: mpsc::Receiver<Message>,
+    closed_notifier: tokio_util::sync::CancellationToken,
+) {
     let mut ssrc_stats: StatsContainer = Default::default();
     let mut cleanup_ticker = tokio::time::interval(Duration::from_secs(10));
 
@@ -207,6 +214,9 @@ async fn run_stats_reducer(mut rx: mpsc::Receiver<Message>) {
             }
             _ = cleanup_ticker.tick() => {
                 ssrc_stats.remove_stale_entries();
+            }
+            _ = closed_notifier.cancelled() => {
+                break;
             }
         }
     }
@@ -340,11 +350,11 @@ impl Interceptor for StatsInterceptor {
     /// unbind_local_stream is called when the Stream is removed. It can be used to clean up any data related to that track.
     async fn unbind_local_stream(&self, info: &StreamInfo) {
         let mut lock = self.send_streams.lock();
-
         lock.remove(&info.ssrc);
     }
 
     async fn close(&self) -> Result<()> {
+        self.closed_notifier.cancel();
         Ok(())
     }
 

@@ -57,7 +57,7 @@ impl ReportBuilder {
     }
 
     fn build_sr(&self) -> SenderReport {
-        let (close_tx, close_rx) = mpsc::channel(1);
+        let cancellation_token = tokio_util::sync::CancellationToken::new();
         SenderReport {
             internal: Arc::new(SenderReportInternal {
                 interval: if let Some(interval) = &self.interval {
@@ -67,11 +67,11 @@ impl ReportBuilder {
                 },
                 now: self.now.clone(),
                 streams: Mutex::new(HashMap::new()),
-                close_rx: Mutex::new(Some(close_rx)),
+                close_rx: cancellation_token.clone(),
             }),
 
             wg: Mutex::new(Some(WaitGroup::new())),
-            close_tx: Mutex::new(Some(close_tx)),
+            close_tx: cancellation_token.clone(),
         }
     }
 }

@@ -2,6 +2,7 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 use std::str::FromStr;
 use std::sync::Arc;
 
+use tracing::Instrument;
 use util::vnet::net::*;
 use util::Conn;
 use waitgroup::WaitGroup;
@@ -34,6 +35,7 @@ pub(crate) struct GatherCandidatesInternalParams {
     pub(crate) agent_internal: Arc<AgentInternal>,
     pub(crate) gathering_state: Arc<AtomicU8>,
     pub(crate) chan_candidate_tx: ChanCandidateTx,
+    pub(crate) include_loopback: bool,
 }
 
 struct GatherCandidatesLocalParams {
@@ -46,6 +48,7 @@ struct GatherCandidatesLocalParams {
     ext_ip_mapper: Arc<Option<ExternalIpMapper>>,
     net: Arc<Net>,
     agent_internal: Arc<AgentInternal>,
+    include_loopback: bool,
 }
 
 struct GatherCandidatesLocalUDPMuxParams {
@@ -56,6 +59,7 @@ struct GatherCandidatesLocalUDPMuxParams {
     net: Arc<Net>,
     agent_internal: Arc<AgentInternal>,
     udp_mux: Arc<dyn UDPMux + Send + Sync>,
+    include_loopback: bool,
 }
 
 struct GatherCandidatesSrflxMappedParasm {
@@ -77,6 +81,7 @@ struct GatherCandidatesSrflxParams {
 }
 
 impl Agent {
+    #[tracing::instrument(skip(params))]
     pub(crate) async fn gather_candidates_internal(params: GatherCandidatesInternalParams) {
         Self::set_gathering_state(
             &params.chan_candidate_tx,
@@ -100,6 +105,7 @@ impl Agent {
                         ext_ip_mapper: Arc::clone(&params.ext_ip_mapper),
                         net: Arc::clone(&params.net),
                         agent_internal: Arc::clone(&params.agent_internal),
+                        include_loopback: params.include_loopback,
                     };
 
                     let w = wg.worker();
@@ -125,11 +131,16 @@ impl Agent {
                         agent_internal: Arc::clone(&params.agent_internal),
                     };
                     let w1 = wg.worker();
-                    tokio::spawn(async move {
-                        let _d = w1;
-
-                        Self::gather_candidates_srflx(srflx_params).await;
-                    });
+                    tokio::spawn(
+                        async move {
+                            let _d = w1;
+                            Self::gather_candidates_srflx(srflx_params).await;
+                        }
+                        .instrument(tracing::span!(
+                            tracing::Level::INFO,
+                            "gather_candidates_srflx_spawn"
+                        )),
+                    );
                     if let Some(ext_ip_mapper) = &*params.ext_ip_mapper {
                         if ext_ip_mapper.candidate_type == CandidateType::ServerReflexive {
                             let srflx_mapped_params = GatherCandidatesSrflxMappedParasm {
@@ -192,6 +203,7 @@ impl Agent {
         gathering_state.store(new_state as u8, Ordering::SeqCst);
     }
 
+    #[tracing::instrument(skip(params))]
     async fn gather_candidates_local(params: GatherCandidatesLocalParams) {
         let GatherCandidatesLocalParams {
             udp_network,
@@ -203,6 +215,7 @@ impl Agent {
             ext_ip_mapper,
             net,
             agent_internal,
+            include_loopback,
         } = params;
 
         // If we wanna use UDP mux, do so
@@ -216,6 +229,7 @@ impl Agent {
                 net,
                 agent_internal,
                 udp_mux,
+                include_loopback,
             })
             .await;
 
@@ -226,7 +240,14 @@ impl Agent {
             return;
         }
 
-        let ips = local_interfaces(&net, &interface_filter, &ip_filter, &network_types).await;
+        let ips = local_interfaces(
+            &net,
+            &interface_filter,
+            &ip_filter,
+            &network_types,
+            include_loopback,
+        )
+        .await;
         for ip in ips {
             let mut mapped_ip = ip;
 
@@ -273,6 +294,7 @@ impl Agent {
                     // accessible from the current interface.
                 case udp:*/
 
+                tracing::info!("about to listen  in gather_candidates_local");
                 let conn: Arc<dyn Conn + Send + Sync> = match listen_udp_in_port_range(
                     &net,
                     ephemeral_config.port_max(),
@@ -380,6 +402,7 @@ impl Agent {
             net,
             agent_internal,
             udp_mux,
+            include_loopback,
         } = params;
 
         // Filter out non UDP network types
@@ -388,8 +411,14 @@ impl Agent {
 
         let udp_mux = Arc::clone(&udp_mux);
 
-        let local_ips =
-            local_interfaces(&net, &interface_filter, &ip_filter, &relevant_network_types).await;
+        let local_ips = local_interfaces(
+            &net,
+            &interface_filter,
+            &ip_filter,
+            &relevant_network_types,
+            include_loopback,
+        )
+        .await;
 
         let candidate_ips: Vec<std::net::IpAddr> = ext_ip_mapper
             .as_ref() // Arc
@@ -453,6 +482,7 @@ impl Agent {
         Ok(())
     }
 
+    #[tracing::instrument(skip(params))]
     async fn gather_candidates_srflx_mapped(params: GatherCandidatesSrflxMappedParasm) {
         let GatherCandidatesSrflxMappedParasm {
             network_types,
@@ -574,12 +604,13 @@ impl Agent {
                 }
 
                 Result::<()>::Ok(())
-            });
+            }.instrument(tracing::span!(tracing::Level::INFO, "gather_candidates_srflx_mapped")));
         }
 
         wg.wait().await;
     }
 
+    #[tracing::instrument(skip(params))]
     async fn gather_candidates_srflx(params: GatherCandidatesSrflxParams) {
         let GatherCandidatesSrflxParams {
             urls,
@@ -621,6 +652,10 @@ impl Agent {
                         }
                     };
 
+                    tracing::info!(
+                        "about to listen for {} in gather_candidates_srflx",
+                        server_addr
+                    );
                     let conn: Arc<dyn Conn + Send + Sync> = match listen_udp_in_port_range(
                         &net2,
                         port_max,
@@ -724,7 +759,9 @@ impl Agent {
     ) {
         let wg = WaitGroup::new();
 
+        tracing::info!("gather_candidates_relay urls: {:?}", urls);
         for url in urls {
+            tracing::info!(?url, "gather_candidates_relay url");
             if url.scheme != SchemeType::Turn && url.scheme != SchemeType::Turns {
                 continue;
             }
@@ -755,6 +792,7 @@ impl Agent {
 
                 let turn_server_addr = format!("{}:{}", url.host, url.port);
 
+                tracing::info!(?url, "entering a spawn for the url");
                 let (loc_conn, rel_addr, rel_port) =
                     if url.proto == ProtoType::Udp && url.scheme == SchemeType::Turn {
                         let loc_conn = match net2.bind(SocketAddr::from_str("0.0.0.0:0")?).await {
@@ -786,17 +824,26 @@ impl Agent {
                         return Ok(());
                     };
 
+                tracing::info!(
+                    ?url,
+                    ?rel_addr,
+                    ?rel_port,
+                    "got the loc_conn, rel_addr, rel_port"
+                );
+
                 let cfg = turn::client::ClientConfig {
                     stun_serv_addr: String::new(),
                     turn_serv_addr: turn_server_addr.clone(),
-                    username: url.username,
-                    password: url.password,
+                    username: url.username.clone(),
+                    password: url.password.clone(),
                     realm: String::new(),
                     software: String::new(),
                     rto_in_ms: 0,
                     conn: loc_conn,
                     vnet: Some(Arc::clone(&net2)),
                 };
+
+                tracing::info!(?url, ?rel_addr, ?rel_port, "config created");
                 let client = match turn::client::Client::new(cfg).await {
                     Ok(client) => Arc::new(client),
                     Err(err) => {
@@ -809,6 +856,8 @@ impl Agent {
                         return Ok(());
                     }
                 };
+
+                tracing::info!(?url, ?rel_addr, ?rel_port, "client created");
                 if let Err(err) = client.listen().await {
                     let _ = client.close().await;
                     log::warn!(
@@ -820,6 +869,7 @@ impl Agent {
                     return Ok(());
                 }
 
+                tracing::info!(?url, ?rel_addr, ?rel_port, "listen ok");
                 let relay_conn: Arc<dyn Conn + Send + Sync> = match client.allocate().await {
                     Ok(conn) => Arc::new(conn),
                     Err(err) => {
@@ -834,6 +884,7 @@ impl Agent {
                     }
                 };
 
+                tracing::info!(?url, ?rel_addr, ?rel_port, "allocate ok");
                 let raddr = relay_conn.local_addr()?;
                 let relay_config = CandidateRelayConfig {
                     base_config: CandidateBaseConfig {
@@ -844,11 +895,12 @@ impl Agent {
                         conn: Some(Arc::clone(&relay_conn)),
                         ..CandidateBaseConfig::default()
                     },
-                    rel_addr,
+                    rel_addr: rel_addr.clone(),
                     rel_port,
                     relay_client: Some(Arc::clone(&client)),
                 };
 
+                tracing::info!(?url, ?rel_addr, ?rel_port, "relay config ok");
                 let candidate: Arc<dyn Candidate + Send + Sync> =
                     match relay_config.new_candidate_relay() {
                         Ok(candidate) => Arc::new(candidate),
@@ -866,6 +918,7 @@ impl Agent {
                         }
                     };
 
+                tracing::info!(?url, ?rel_addr, ?rel_port, "candidate ok");
                 {
                     if let Err(err) = agent_internal2.add_candidate(&candidate).await {
                         if let Err(close_err) = candidate.close().await {
@@ -881,6 +934,7 @@ impl Agent {
                             err
                         );
                     }
+                    tracing::info!(?url, ?rel_addr, ?rel_port, "add candidate ok");
                 }
 
                 Result::<()>::Ok(())

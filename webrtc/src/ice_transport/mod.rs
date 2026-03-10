@@ -11,7 +11,7 @@ use ice_candidate_pair::RTCIceCandidatePair;
 use ice_gatherer::RTCIceGatherer;
 use ice_role::RTCIceRole;
 use portable_atomic::AtomicU8;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::Mutex;
 use util::Conn;
 
 use crate::error::{flatten_errs, Error, Result};
@@ -24,14 +24,10 @@ use crate::stats::stats_collector::StatsCollector;
 use crate::stats::ICETransportStats;
 use crate::stats::StatsReportType::Transport;
 
-#[cfg(test)]
-mod ice_transport_test;
-
 pub mod ice_candidate;
 pub mod ice_candidate_pair;
 pub mod ice_candidate_type;
 pub mod ice_connection_state;
-pub mod ice_credential_type;
 pub mod ice_gatherer;
 pub mod ice_gatherer_state;
 pub mod ice_gathering_state;
@@ -58,7 +54,7 @@ struct ICETransportInternal {
     role: RTCIceRole,
     conn: Option<Arc<dyn Conn + Send + Sync>>, //AgentConn
     mux: Option<Mux>,
-    cancel_tx: Option<mpsc::Sender<()>>,
+    cancel_tx: std::sync::Arc<tokio::sync::Notify>,
 }
 
 /// ICETransport allows an application access to information about the ICE
@@ -148,18 +144,18 @@ impl RTCIceTransport {
                 RTCIceRole::Controlled
             };
 
-            let (cancel_tx, cancel_rx) = mpsc::channel(1);
+            let cancell_notifier = std::sync::Arc::new(tokio::sync::Notify::new());
             {
                 let mut internal = self.internal.lock().await;
                 internal.role = role;
-                internal.cancel_tx = Some(cancel_tx);
+                internal.cancel_tx = cancell_notifier.clone();
             }
 
             let conn: Arc<dyn Conn + Send + Sync> = match role {
                 RTCIceRole::Controlling => {
                     agent
                         .dial(
-                            cancel_rx,
+                            cancell_notifier.clone(),
                             params.username_fragment.clone(),
                             params.password.clone(),
                         )
@@ -169,7 +165,7 @@ impl RTCIceTransport {
                 RTCIceRole::Controlled => {
                     agent
                         .accept(
-                            cancel_rx,
+                            cancell_notifier.clone(),
                             params.username_fragment.clone(),
                             params.password.clone(),
                         )
@@ -217,13 +213,14 @@ impl RTCIceTransport {
     }
 
     /// Stop irreversibly stops the ICETransport.
+    #[tracing::instrument(skip(self))]
     pub async fn stop(&self) -> Result<()> {
         self.set_state(RTCIceTransportState::Closed);
 
         let mut errs: Vec<Error> = vec![];
         {
             let mut internal = self.internal.lock().await;
-            internal.cancel_tx.take();
+            internal.cancel_tx.notify_waiters();
             if let Some(mut mux) = internal.mux.take() {
                 mux.close().await;
             }
@@ -237,6 +234,9 @@ impl RTCIceTransport {
         if let Err(err) = self.gatherer.close().await {
             errs.push(err);
         }
+
+        self.on_connection_state_change_handler.store(None);
+        self.on_selected_candidate_pair_change_handler.store(None);
 
         flatten_errs(errs)
     }

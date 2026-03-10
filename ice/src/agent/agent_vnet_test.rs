@@ -221,13 +221,12 @@ impl turn::auth::AuthHandler for TestAuthHandler {
     }
 }
 
+#[tracing::instrument(skip(wan_net))]
 pub(crate) async fn add_vnet_stun(wan_net: Arc<net::Net>) -> Result<turn::server::Server, Error> {
     // Run TURN(STUN) server
-    let conn = wan_net
-        .bind(SocketAddr::from_str(&format!(
-            "{VNET_STUN_SERVER_IP}:{VNET_STUN_SERVER_PORT}"
-        ))?)
-        .await?;
+    let socket_addr =
+        SocketAddr::from_str(&format!("{VNET_STUN_SERVER_IP}:{VNET_STUN_SERVER_PORT}"))?;
+    let conn = wan_net.bind(socket_addr).await?;
 
     let server = turn::server::Server::new(turn::server::config::ServerConfig {
         conn_configs: vec![turn::server::config::ConnConfig {
@@ -261,19 +260,23 @@ pub(crate) async fn connect_with_vnet(
     gather_and_exchange_candidates(a_agent, b_agent).await?;
 
     let (accepted_tx, mut accepted_rx) = mpsc::channel(1);
-    let (_a_cancel_tx, a_cancel_rx) = mpsc::channel(1);
+    // let (_a_cancel_tx, a_cancel_rx) = mpsc::channel(1);
+    let cancellation_token = Arc::new(tokio::sync::Notify::new());
 
     let agent_a = Arc::clone(a_agent);
-    tokio::spawn(async move {
-        let a_conn = agent_a.accept(a_cancel_rx, b_ufrag, b_pwd).await?;
-
-        let _ = accepted_tx.send(a_conn).await;
-
-        Result::<(), Error>::Ok(())
+    tokio::spawn({
+        let cancellation_token = Arc::clone(&cancellation_token);
+        async move {
+            let a_conn = agent_a.accept(cancellation_token, b_ufrag, b_pwd).await?;
+            let _ = accepted_tx.send(a_conn).await;
+            Result::<(), Error>::Ok(())
+        }
     });
 
-    let (_b_cancel_tx, b_cancel_rx) = mpsc::channel(1);
-    let b_conn = b_agent.dial(b_cancel_rx, a_ufrag, a_pwd).await?;
+    // let (_b_cancel_tx, b_cancel_rx) = mpsc::channel(1);
+    let b_conn = b_agent
+        .dial(cancellation_token.clone(), a_ufrag, a_pwd)
+        .await?;
 
     // Ensure accepted
     if let Some(a_conn) = accepted_rx.recv().await {

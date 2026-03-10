@@ -1,6 +1,6 @@
-use portable_atomic::{AtomicU16, AtomicU8};
 use std::sync::Arc;
 
+use portable_atomic::{AtomicU16, AtomicU8};
 use util::sync::Mutex as SyncMutex;
 
 use super::candidate_base::*;

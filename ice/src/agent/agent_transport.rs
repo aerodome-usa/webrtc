@@ -17,7 +17,7 @@ impl Agent {
     /// closes.
     pub async fn dial(
         &self,
-        mut cancel_rx: mpsc::Receiver<()>,
+        cancel_rx: Arc<tokio::sync::Notify>,
         remote_ufrag: String,
         remote_pwd: String,
     ) -> Result<Arc<impl Conn>> {
@@ -37,7 +37,7 @@ impl Agent {
             // block until pair selected
             tokio::select! {
                 _ = on_connected_rx.recv() => {},
-                _ = cancel_rx.recv() => {
+                _ = cancel_rx.notified() => {
                     return Err(Error::ErrCanceledByCaller);
                 }
             }
@@ -52,7 +52,7 @@ impl Agent {
     /// closes.
     pub async fn accept(
         &self,
-        mut cancel_rx: mpsc::Receiver<()>,
+        cancel_rx: Arc<tokio::sync::Notify>,
         remote_ufrag: String,
         remote_pwd: String,
     ) -> Result<Arc<impl Conn>> {
@@ -72,7 +72,7 @@ impl Agent {
             // block until pair selected
             tokio::select! {
                 _ = on_connected_rx.recv() => {},
-                _ = cancel_rx.recv() => {
+                _ = cancel_rx.notified() => {
                     return Err(Error::ErrCanceledByCaller);
                 }
             }
@@ -242,6 +242,12 @@ impl Conn for AgentConn {
     }
 
     async fn close(&self) -> std::result::Result<(), util::Error> {
+        let mut checklist = self.checklist.lock().await;
+        self.selected_pair.store(None);
+        for item in checklist.drain(..) {
+            item.local.get_closed_ch().notify_waiters();
+            item.remote.get_closed_ch().notify_waiters();
+        }
         Ok(())
     }
 

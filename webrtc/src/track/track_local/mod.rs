@@ -12,6 +12,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use interceptor::{Attributes, RTPWriter};
 use portable_atomic::AtomicBool;
+use smol_str::SmolStr;
 use tokio::sync::Mutex;
 use util::Unmarshal;
 
@@ -22,11 +23,26 @@ use crate::rtp_transceiver::*;
 /// TrackLocalWriter is the Writer for outbound RTP Packets
 #[async_trait]
 pub trait TrackLocalWriter: fmt::Debug {
+    /// write_rtp_with_attributes encrypts a RTP packet and writes to the connection.
+    /// attributes are delivered to the interceptor chain
+    async fn write_rtp_with_attributes(
+        &self,
+        pkt: &rtp::packet::Packet,
+        attr: &Attributes,
+    ) -> Result<usize>;
+
     /// write_rtp encrypts a RTP packet and writes to the connection
-    async fn write_rtp(&self, p: &rtp::packet::Packet) -> Result<usize>;
+    async fn write_rtp(&self, pkt: &rtp::packet::Packet) -> Result<usize> {
+        let attr = Attributes::new();
+        self.write_rtp_with_attributes(pkt, &attr).await
+    }
 
     /// write encrypts and writes a full RTP packet
-    async fn write(&self, b: &[u8]) -> Result<usize>;
+    async fn write(&self, mut b: &[u8]) -> Result<usize> {
+        let pkt = rtp::packet::Packet::unmarshal(&mut b)?;
+        let attr = Attributes::new();
+        self.write_rtp_with_attributes(&pkt, &attr).await
+    }
 }
 
 /// TrackLocalContext is the Context passed when a TrackLocal has been Binded/Unbinded from a PeerConnection, and used
@@ -38,6 +54,7 @@ pub struct TrackLocalContext {
     pub(crate) ssrc: SSRC,
     pub(crate) write_stream: Option<Arc<dyn TrackLocalWriter + Send + Sync>>,
     pub(crate) paused: Arc<AtomicBool>,
+    pub(crate) mid: Option<SmolStr>,
 }
 
 impl TrackLocalContext {
@@ -89,6 +106,9 @@ pub trait TrackLocal {
     /// and stream_id would be 'desktop' or 'webcam'
     fn id(&self) -> &str;
 
+    /// RID is the RTP Stream ID for this track.
+    fn rid(&self) -> Option<&str>;
+
     /// stream_id is the group this track belongs too. This must be unique
     fn stream_id(&self) -> &str;
 
@@ -109,6 +129,7 @@ pub(crate) struct TrackBinding {
     params: RTCRtpParameters,
     write_stream: Option<Arc<dyn TrackLocalWriter + Send + Sync>>,
     sender_paused: Arc<AtomicBool>,
+    hdr_ext_ids: Vec<rtp::header::Extension>,
 }
 
 impl TrackBinding {
@@ -143,22 +164,20 @@ impl std::fmt::Debug for InterceptorToTrackLocalWriter {
 
 #[async_trait]
 impl TrackLocalWriter for InterceptorToTrackLocalWriter {
-    async fn write_rtp(&self, pkt: &rtp::packet::Packet) -> Result<usize> {
+    async fn write_rtp_with_attributes(
+        &self,
+        pkt: &rtp::packet::Packet,
+        attr: &Attributes,
+    ) -> Result<usize> {
         if self.is_sender_paused() {
             return Ok(0);
         }
 
         let interceptor_rtp_writer = self.interceptor_rtp_writer.lock().await;
         if let Some(writer) = &*interceptor_rtp_writer {
-            let a = Attributes::new();
-            Ok(writer.write(pkt, &a).await?)
+            Ok(writer.write(pkt, attr).await?)
         } else {
             Ok(0)
         }
-    }
-
-    async fn write(&self, mut b: &[u8]) -> Result<usize> {
-        let pkt = rtp::packet::Packet::unmarshal(&mut b)?;
-        self.write_rtp(&pkt).await
     }
 }

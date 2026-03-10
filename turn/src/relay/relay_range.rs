@@ -42,6 +42,7 @@ impl RelayAddressGenerator for RelayAddressGeneratorRanges {
         }
     }
 
+    #[tracing::instrument(skip(self))]
     async fn allocate_conn(
         &self,
         use_ipv4: bool,
@@ -70,6 +71,7 @@ impl RelayAddressGenerator for RelayAddressGeneratorRanges {
                 .net
                 .resolve_addr(use_ipv4, &format!("{}:{}", self.address, port))
                 .await?;
+
             let conn = match self.net.bind(addr).await {
                 Ok(conn) => conn,
                 Err(_) => continue,

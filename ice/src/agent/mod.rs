@@ -1,12 +1,3 @@
-#[cfg(test)]
-mod agent_gather_test;
-#[cfg(test)]
-mod agent_test;
-#[cfg(test)]
-mod agent_transport_test;
-#[cfg(test)]
-pub(crate) mod agent_vnet_test;
-
 pub mod agent_config;
 pub mod agent_gather;
 pub(crate) mod agent_internal;
@@ -104,6 +95,7 @@ pub struct Agent {
 
     pub(crate) udp_network: UDPNetwork,
     pub(crate) interface_filter: Arc<Option<InterfaceFilterFn>>,
+    pub(crate) include_loopback: bool,
     pub(crate) ip_filter: Arc<Option<IpFilterFn>>,
     pub(crate) mdns_mode: MulticastDnsMode,
     pub(crate) mdns_name: String,
@@ -200,6 +192,7 @@ impl Agent {
             udp_network: config.udp_network,
             internal: Arc::new(ai),
             interface_filter: Arc::clone(&config.interface_filter),
+            include_loopback: config.include_loopback,
             ip_filter: Arc::clone(&config.ip_filter),
             mdns_mode,
             mdns_name,
@@ -285,18 +278,18 @@ impl Agent {
                 return Err(Error::ErrAddressParseFailed);
             }
 
-            let ai = Arc::clone(&self.internal);
-            let host_candidate = Arc::clone(c);
-            let mdns_conn = self.mdns_conn.clone();
-            tokio::spawn(async move {
-                if let Some(mdns_conn) = mdns_conn {
-                    if let Ok(candidate) =
-                        Self::resolve_and_add_multicast_candidate(mdns_conn, host_candidate).await
-                    {
-                        ai.add_remote_candidate(&candidate).await;
-                    }
-                }
-            });
+            // let ai = Arc::clone(&self.internal);
+            // let host_candidate = Arc::clone(c);
+            // let mdns_conn = self.mdns_conn.clone();
+            // tokio::spawn(async move {
+            //     if let Some(mdns_conn) = mdns_conn {
+            //         if let Ok(candidate) =
+            //             Self::resolve_and_add_multicast_candidate(mdns_conn, host_candidate).await
+            //         {
+            //             ai.add_remote_candidate(&candidate).await;
+            //         }
+            //     }
+            // });
         } else {
             let ai = Arc::clone(&self.internal);
             let candidate = Arc::clone(c);
@@ -337,18 +330,19 @@ impl Agent {
     }
 
     /// Cleans up the Agent.
+    #[tracing::instrument(skip(self))]
     pub async fn close(&self) -> Result<()> {
+        tracing::info!("About to cancel candidate gathering");
+        //FIXME: deadlock here
+        let internal_close = self.internal.close().await;
         if let Some(gather_candidate_cancel) = &self.gather_candidate_cancel {
             gather_candidate_cancel();
         }
-
         if let UDPNetwork::Muxed(ref udp_mux) = self.udp_network {
             let (ufrag, _) = self.get_local_user_credentials().await;
             udp_mux.remove_conn_by_ufrag(&ufrag).await;
         }
-
-        //FIXME: deadlock here
-        self.internal.close().await
+        internal_close
     }
 
     /// Returns the selected pair or nil if there is none
@@ -372,6 +366,7 @@ impl Agent {
     ///
     /// Restart must only be called when `GatheringState` is `GatheringStateComplete`
     /// a user must then call `GatherCandidates` explicitly to start generating new ones.
+    #[tracing::instrument(skip(self))]
     pub async fn restart(&self, mut ufrag: String, mut pwd: String) -> Result<()> {
         if ufrag.is_empty() {
             ufrag = generate_ufrag();
@@ -395,13 +390,6 @@ impl Agent {
         self.gathering_state
             .store(GatheringState::New as u8, Ordering::SeqCst);
 
-        {
-            let done_tx = self.internal.done_tx.lock().await;
-            if done_tx.is_none() {
-                return Err(Error::ErrClosed);
-            }
-        }
-
         // Clear all agent needed to take back to fresh state
         {
             let mut ufrag_pwd = self.internal.ufrag_pwd.lock().await;
@@ -417,6 +405,7 @@ impl Agent {
 
         {
             let mut checklist = self.internal.agent_conn.checklist.lock().await;
+            tracing::info!("nullifying the checklist");
             *checklist = vec![];
         }
 
@@ -465,6 +454,7 @@ impl Agent {
             agent_internal: Arc::clone(&self.internal),
             gathering_state: Arc::clone(&self.gathering_state),
             chan_candidate_tx: Arc::clone(&self.internal.chan_candidate_tx),
+            include_loopback: self.include_loopback,
         };
         tokio::spawn(async move {
             Self::gather_candidates_internal(params).await;

@@ -90,17 +90,24 @@ pub struct ListenConfig {
     pub accept_filter: Option<AcceptFilterFn>,
 }
 
-pub async fn listen<A: ToSocketAddrs>(laddr: A) -> Result<impl Listener> {
+pub async fn listen<A: ToSocketAddrs + std::fmt::Debug>(laddr: A) -> Result<impl Listener> {
     ListenConfig::default().listen(laddr).await
 }
 
 impl ListenConfig {
     /// Listen creates a new listener based on the ListenConfig.
-    pub async fn listen<A: ToSocketAddrs>(&mut self, laddr: A) -> Result<impl Listener> {
+    pub async fn listen<A: ToSocketAddrs + std::fmt::Debug>(
+        &mut self,
+        laddr: A,
+    ) -> Result<impl Listener> {
         if self.backlog == 0 {
             self.backlog = DEFAULT_LISTEN_BACKLOG;
         }
 
+        tracing::info!(
+            "ListenConfig listen on: {:?}",
+            format!("{:?}", laddr).as_str()
+        );
         let pconn = Arc::new(UdpSocket::bind(laddr).await?);
         let (accept_ch_tx, accept_ch_rx) = mpsc::channel(self.backlog);
         let (done_ch_tx, done_ch_rx) = watch::channel(());
@@ -211,7 +218,7 @@ impl ListenConfig {
             }
         }
 
-        let udp_conn = Arc::new(UdpConn::new(Arc::clone(pconn), Arc::clone(conns), raddr));
+        let udp_conn = Arc::new(UdpConn::new(Arc::clone(pconn), raddr));
         {
             let accept_ch = accept_ch_tx.lock().await;
             if let Some(tx) = &*accept_ch {
@@ -235,20 +242,14 @@ impl ListenConfig {
 /// UdpConn augments a connection-oriented connection over a UdpSocket
 pub struct UdpConn {
     pconn: Arc<dyn Conn + Send + Sync>,
-    conns: Arc<Mutex<HashMap<String, Arc<UdpConn>>>>,
     raddr: SocketAddr,
     buffer: Buffer,
 }
 
 impl UdpConn {
-    fn new(
-        pconn: Arc<dyn Conn + Send + Sync>,
-        conns: Arc<Mutex<HashMap<String, Arc<UdpConn>>>>,
-        raddr: SocketAddr,
-    ) -> Self {
+    fn new(pconn: Arc<dyn Conn + Send + Sync>, raddr: SocketAddr) -> Self {
         UdpConn {
             pconn,
-            conns,
             raddr,
             buffer: Buffer::new(0, 0),
         }
@@ -287,8 +288,6 @@ impl Conn for UdpConn {
     }
 
     async fn close(&self) -> Result<()> {
-        let mut conns = self.conns.lock().await;
-        conns.remove(self.raddr.to_string().as_str());
         Ok(())
     }
 

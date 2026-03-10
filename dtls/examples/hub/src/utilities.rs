@@ -106,8 +106,8 @@ pub fn load_certificate(path: PathBuf) -> Result<Vec<CertificateDer<'static>>, E
     let f = File::open(path)?;
 
     let mut reader = BufReader::new(f);
-    match rustls_pemfile::certs(&mut reader) {
-        Ok(certs) => Ok(certs.into_iter().map(CertificateDer::from).collect()),
+    match rustls_pemfile::certs(&mut reader).collect::<Result<Vec<_>, _>>() {
+        Ok(certs) => Ok(certs.into_iter().collect()),
         Err(_) => Err(Error::ErrNoCertificateFound),
     }
 }
