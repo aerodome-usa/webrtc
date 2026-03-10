@@ -128,16 +128,13 @@ impl SrtpWriterFuture {
                 return Ok(());
             }
         } else {
-            let mut rx = self.rtp_transport.srtp_ready_rx.lock().await;
-            if let Some(srtp_ready_rx) = &mut *rx {
-                if let Some(rtp_sender) = self.rtp_sender.upgrade() {
-                    tokio::select! {
-                        _ = rtp_sender.stop_called_rx.notified()=> return Err(Error::ErrClosedPipe),
-                        _ = srtp_ready_rx.recv() =>{}
-                    }
-                } else {
-                    return Err(Error::ErrClosedPipe);
+            if let Some(rtp_sender) = self.rtp_sender.upgrade() {
+                tokio::select! {
+                    _ = rtp_sender.stop_called_rx.notified()=> return Err(Error::ErrClosedPipe),
+                    _ = self.rtp_transport.srtp_ready.cancelled() =>{}
                 }
+            } else {
+                return Err(Error::ErrClosedPipe);
             }
         }
 

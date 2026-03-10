@@ -46,7 +46,7 @@ async fn test_invalid_fingerprint_causes_failed() -> Result<()> {
         panic!("A DataChannel must not be created when Fingerprint verification fails");
     }));
 
-    let (offer_chan_tx, mut offer_chan_rx) = mpsc::channel::<()>(1);
+    let (offer_chan_tx, mut offer_chan_rx) = tokio::sync::mpsc::channel::<()>(1);
 
     let offer_chan_tx = Arc::new(offer_chan_tx);
     pc_offer.on_ice_candidate(Box::new(move |candidate: Option<RTCIceCandidate>| {

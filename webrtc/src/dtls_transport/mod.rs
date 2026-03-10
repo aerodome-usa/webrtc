@@ -17,7 +17,8 @@ use sha2::{Digest, Sha256};
 use srtp::protection_profile::ProtectionProfile;
 use srtp::session::Session;
 use srtp::stream::Stream;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::Mutex;
+use tokio_util::sync::CancellationToken;
 use util::Conn;
 
 use crate::api::setting_engine::SettingEngine;
@@ -81,8 +82,7 @@ pub struct RTCDtlsTransport {
     pub(crate) simulcast_streams: Mutex<HashMap<SSRC, Arc<Stream>>>,
 
     pub(crate) srtp_ready_signal: Arc<AtomicBool>,
-    pub(crate) srtp_ready_tx: Mutex<Option<mpsc::Sender<()>>>,
-    pub(crate) srtp_ready_rx: Mutex<Option<mpsc::Receiver<()>>>,
+    pub(crate) srtp_ready: CancellationToken,
 
     pub(crate) dtls_matcher: Option<MatchFunc>,
 }
@@ -93,14 +93,12 @@ impl RTCDtlsTransport {
         certificates: Vec<RTCCertificate>,
         setting_engine: Arc<SettingEngine>,
     ) -> Self {
-        let (srtp_ready_tx, srtp_ready_rx) = mpsc::channel(1);
         RTCDtlsTransport {
             ice_transport,
             certificates,
             setting_engine,
             srtp_ready_signal: Arc::new(AtomicBool::new(false)),
-            srtp_ready_tx: Mutex::new(Some(srtp_ready_tx)),
-            srtp_ready_rx: Mutex::new(Some(srtp_ready_rx)),
+            srtp_ready: CancellationToken::new(),
             state: AtomicU8::new(RTCDtlsTransportState::New as u8),
             dtls_matcher: Some(Box::new(match_dtls)),
             ..Default::default()
@@ -262,13 +260,8 @@ impl RTCDtlsTransport {
             };
         }
 
-        {
-            let mut srtp_ready_tx = self.srtp_ready_tx.lock().await;
-            srtp_ready_tx.take();
-            if srtp_ready_tx.is_none() {
-                self.srtp_ready_signal.store(true, Ordering::SeqCst);
-            }
-        }
+        self.srtp_ready_signal.store(true, Ordering::SeqCst);
+        self.srtp_ready.cancel();
 
         Ok(())
     }

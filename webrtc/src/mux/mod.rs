@@ -9,7 +9,9 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use portable_atomic::AtomicUsize;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::Mutex;
+use tokio_util::future::FutureExt;
+use tokio_util::sync::CancellationToken;
 use util::{Buffer, Conn};
 
 use crate::error::Result;
@@ -36,25 +38,25 @@ pub struct Mux {
     next_conn: Arc<dyn Conn + Send + Sync>,
     endpoints: Arc<Mutex<HashMap<usize, Arc<Endpoint>>>>,
     buffer_size: usize,
-    closed_ch_tx: Option<mpsc::Sender<()>>,
+    closed: CancellationToken,
 }
 
 impl Mux {
     pub fn new(config: Config) -> Self {
-        let (closed_ch_tx, closed_ch_rx) = mpsc::channel(1);
+        let closed = CancellationToken::new();
         let m = Mux {
             id: Arc::new(AtomicUsize::new(0)),
             next_conn: Arc::clone(&config.conn),
             endpoints: Arc::new(Mutex::new(HashMap::new())),
             buffer_size: config.buffer_size,
-            closed_ch_tx: Some(closed_ch_tx),
+            closed: closed.clone(),
         };
 
         let buffer_size = m.buffer_size;
         let next_conn = Arc::clone(&m.next_conn);
         let endpoints = Arc::clone(&m.endpoints);
         tokio::spawn(async move {
-            Mux::read_loop(buffer_size, next_conn, closed_ch_rx, endpoints).await;
+            Mux::read_loop(buffer_size, next_conn, closed, endpoints).await;
         });
 
         m
@@ -87,7 +89,7 @@ impl Mux {
 
     /// Close closes the Mux and all associated Endpoints.
     pub async fn close(&mut self) {
-        self.closed_ch_tx.take();
+        self.closed.cancel();
 
         let mut endpoints = self.endpoints.lock().await;
         endpoints.clear();
@@ -96,22 +98,22 @@ impl Mux {
     async fn read_loop(
         buffer_size: usize,
         next_conn: Arc<dyn Conn + Send + Sync>,
-        mut closed_ch_rx: mpsc::Receiver<()>,
+        closed: CancellationToken,
         endpoints: Arc<Mutex<HashMap<usize, Arc<Endpoint>>>>,
     ) {
         let mut buf = vec![0u8; buffer_size];
         let mut n = 0usize;
         loop {
-            tokio::select! {
-                _ = closed_ch_rx.recv() => {
-                    break
-                },
-                result = next_conn.recv(&mut buf) => {
-                    if let Ok(m) = result{
-                        n = m;
-                    }
-                }
+            let Some(result) = next_conn
+                .recv(&mut buf)
+                .with_cancellation_token(&closed)
+                .await
+            else {
+                break;
             };
+            if let Ok(m) = result {
+                n = m;
+            }
 
             if let Err(err) = Mux::dispatch(&buf[..n], &endpoints).await {
                 log::error!("mux: ending readLoop dispatch error {err:?}");
